@@ -1,0 +1,698 @@
+---
+title: "10_Reef_Flat_Models"
+author: "Stephan Bitterwolf"
+date: "2023-07-27"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 500px;
+}
+
+.btn {
+    border-width: 0px 0px 0px;
+    font-weight: normal;
+    text-transform: ;
+}
+.btn-default {
+    color: #2ecc71;
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+
+
+.header-section-number::after {
+  content: ".";
+}
+```
+# Overview
+
+The purpose of this code is to compare the Ordinary Least Squares Regression for the Hawaiian Island Erosion and Reef dataset with and without autocorrelation correction.
+
+```{r Libraries, message=FALSE, warning=FALSE}
+# library(tidyverse)
+# library(spatial)
+
+#library a bunch of packages we may (or may not) use - install them first if not installed already. 
+library(tidyverse)
+library(sf)
+library(tmap)
+library(here)
+
+```
+# Importing and Merging Data
+```{r Import Data}
+
+Reefs_and_erosion<-st_read(here("2_output", "modified_shapefiles", "joined_databases", "reefs_and_erosion_w_geometry_modified.gpkg"))
+Reefs_and_erosion<-Reefs_and_erosion %>%
+  filter(Reef_Zones!="No Reef")
+Reefs_and_erosion<-Reefs_and_erosion%>%
+  dplyr::select(SRate_m, Suncert_m,Sstd_m, everything()) 
+
+#Overwrite any infinite values with NA
+Reefs_and_erosion%>%
+filter(Islxnam=="Kauai @ Anini")%>%
+  dplyr::select(Min_Reef_Depth)
+##Overwrite them
+Reefs_and_erosion<-Reefs_and_erosion%>%
+mutate(across(Min_Reef_Depth, ~ ifelse(is.infinite(.), NA, .)))
+##See change
+Reefs_and_erosion%>%
+filter(Islxnam=="Kauai @ Anini")%>%
+  dplyr::select(Min_Reef_Depth)
+
+```
+
+## Agregate Data by Site
+Here I detect outliers, aggregate data with a weighted mean on a site by site basis, and then save that dataset.
+```{r Aggregate by Site}
+
+
+### Use Tukey's fences to remove outliers but keep sites where there is only 1 erosion value
+Reefs_and_erosion <- Reefs_and_erosion %>%
+  group_by(Islxnam) %>%
+  mutate(
+    Q1 = quantile(SRate_m, 0.25),
+    Q3 = quantile(SRate_m, 0.75),
+    IQR = Q3 - Q1,
+    Lower_Fence = Q1 - 3 * IQR,
+    Upper_Fence = Q3 + 3 * IQR,
+    n_erosion=n()
+  ) %>%
+  mutate(outlier=if_else(n_erosion==1,FALSE,(SRate_m <= Lower_Fence | SRate_m >= Upper_Fence)))%>% #Keep sites where there is only one erosion value
+  mutate(n_outlier=sum(outlier))%>%
+  ungroup()
+max(Reefs_and_erosion$n_outlier)
+
+write_csv(Reefs_and_erosion, here("2_output", "dataframes","reefs_and_erosion_w_geometry-site_outliers.csv"))
+
+#save outlier summary data to join to summarized dataset later
+outlier_summary<-st_drop_geometry(Reefs_and_erosion)%>%
+  group_by(Islxnam)%>%
+  dplyr::select(c("Islxnam","Q1":"n_erosion", "n_outlier"))%>%
+  distinct()
+
+## Aggregated Dataset using the median and the weighted mean **Note these aggregations will only affect the SRate_m value
+weighted_mean <- 
+  Reefs_and_erosion%>%
+  filter(outlier!=TRUE)%>% #Select only non-outliers
+  group_by(Islxnam) %>%
+  mutate(transformed_uncertainty= 1/Suncert_m) %>%
+  summarise(SRate_wgt_mean=weighted.mean(SRate_m,transformed_uncertainty),
+            geom=st_cast(geom[which.min(st_distance(geom, st_centroid(st_union(geom))))], "POINT"),)
+# st_write(weighted_mean, here("2_output", "modified_shapefiles", "joined_databases", "test_mean_ersoion.gpkg"), delete_layer = TRUE)
+
+median_Srate<-Reefs_and_erosion%>%
+  filter(outlier!=TRUE)%>% #Select only non-outliers
+  group_by(Islxnam) %>%
+  mutate(transformed_uncertainty= 1/Suncert_m)%>%
+  summarise(SRate_median=median(SRate_m),
+            geom=st_cast(geom[which.min(st_distance(geom, st_centroid(st_union(geom))))], "POINT"),)
+
+#This section is meant to summarize the reef data by reef transect ID. It removes all non-reef transect data and then selects only those rows with unique values for the reef data. This is used in the median and mean summary calculations. Importantly, without this step the final values would be different as each reef can have multiple erosion points mapping to it. Without filtering distinct rows the values would be slightly different. Not filtering out copy rows could be a good thing if you want to have the number of erosion points mapping to each transect carry some weight. I decided not to do that.
+reef_summary<-Reefs_and_erosion%>%
+ group_by(reef_ID) %>%
+  dplyr::select(-c("flag", "Transect", "SRate_m", "Suncert_m", "Sstd_m", "Num", "DegF","Shape__Len"))%>%
+  distinct() %>%
+  ungroup()
+
+#Remove duplicated reed_IDs: sometimes there are erosion points in one transect that map to two sites. These inflate the dataset and are removed here.
+reef_summary$duplicated<- reef_summary %>%
+  select(reef_ID)%>%
+  duplicated()
+
+reef_summary<- reef_summary %>%
+  filter(duplicated==FALSE)
+
+reef_summary_median<-reef_summary %>%
+  dplyr::select(-c("reef_ID", "Transects_ID", "Shape_Leng", "TransOrder", "CoralCover")) %>% 
+  group_by(Islxnam)%>%
+  summarise(across(where(is.numeric), ~ median(., na.rm = TRUE)),
+            geom=st_cast(geom[which.min(st_distance(geom, st_centroid(st_union(geom))))], "POINT"),) %>%
+  dplyr::select("Islxnam":"fold_WEout_Chng")
+
+reef_summary_mean<-reef_summary %>%
+  dplyr::select(-c("reef_ID", "Transects_ID", "Shape_Leng", "TransOrder", "CoralCover")) %>% 
+  group_by(Islxnam)%>%
+  summarise(across(where(is.numeric), ~ mean(., na.rm = TRUE)),
+            geom=st_cast(geom[which.min(st_distance(geom, st_centroid(st_union(geom))))], "POINT"),) %>%
+  dplyr::select("Islxnam":"fold_WEout_Chng")
+
+
+plot(x=reef_summary_mean$Distance_Offshore_Reef_Flat, y=reef_summary_median$Distance_Offshore_Reef_Flat) #Based on this plot the mean adds more variation in datapoints so I will choose it.
+hist(reef_summary_mean$Distance_Offshore_Reef_Flat)
+hist(reef_summary_median$Distance_Offshore_Reef_Flat)
+
+###
+selected_reef_aggregation_method<-reef_summary_mean
+###
+
+Reef_data_site_aggregated<-left_join(selected_reef_aggregation_method,st_drop_geometry(weighted_mean), by="Islxnam" )
+
+
+Reef_data_site_aggregated<-left_join(Reef_data_site_aggregated,st_drop_geometry(outlier_summary), by="Islxnam" )
+
+#Remove all objects other than the aggregated dataset
+
+rm(list = setdiff(ls(), "Reef_data_site_aggregated"))
+
+class(Reef_data_site_aggregated)
+st_write(Reef_data_site_aggregated, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-sites_no_out.gpkg"), delete_layer = TRUE)
+write_csv(Reef_data_site_aggregated,here("2_output", "dataframes","Reef_data_aggregated-sites_no_out.csv") )
+
+st_write(Reef_data_site_aggregated, here("2_output", "modified_shapefiles", "joined_databases", "Reef_only_aggregated-sites_no_out.gpkg"), delete_layer = TRUE)
+write_csv(Reef_data_site_aggregated,here("2_output", "dataframes","Reef_only_aggregated-sites_no_out.csv") )
+```
+
+## Add Exclusion Column
+Some sites will be excluded due to abnormalities such as:
+1. Historic Sand Mining
+2. Accretion due to offshore sand deposit
+3. Proximity to river discharge sites
+
+
+```{r Excluding Sites}
+#install.packages("googlesheets4")
+library(googlesheets4)
+
+excluded_sites <- read_sheet("https://docs.google.com/spreadsheets/d/1GZ-rRji9zFF583pu2Var3FP6BVr8UrHwLGAtRvC7mRY/edit?usp=sharing")
+
+data<-left_join(Reef_data_site_aggregated, excluded_sites, by=c("Islxnam"="excluded_sites"))
+
+data<-data %>%
+  mutate(site_exclusion=ifelse(is.na(exclusion_reason), "not excluded", "excluded"))%>%
+  select(-`Outlier Status`)
+
+st_write(data, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-sites.gpkg"), delete_layer = TRUE)
+write_csv(data,here("2_output", "dataframes","aggregated_data-sites.csv") )
+```
+
+
+# Reef Flat Regressions
+
+## Select and Aggregate Variables for the Regression
+```{r Select Data, warning=FALSE}
+
+### Exclude Outlier Sites?###
+### Yes
+# data <- data%>%
+#   filter(site_exclusion=="not excluded")
+
+###No
+# data 
+
+#Select Reef Data
+##### Reef Flat #####
+kept_vars_F <- c(#"reef_ID",
+               "SRate_wgt_mean",         #Shoreline Change rate (m/yr)
+               #"Suncert_m", #uncertainty in the change rate (m/yr) used as part of the weighted average
+               
+               #"Island", ##Removed due to conversation with Mike in Jan of 2023
+               #  "Maui",
+               # "Kauai",
+               # "Oahu",
+
+               ### MODEL FORCING ###
+               "WEin1",             #Wave energy entering the model @ 30 m depth
+
+               ### NEW REEF GEOMETRY ###
+                # "Distance_Offshore_Fore_Reef",
+                #"Distance_Offshore_Reef_Crest",
+                "Distance_Offshore_Reef_Flat",
+                 #"Reef_Width",
+                # # # "Zone_Width_Fore_Reef",
+                 # "Zone_Width_Reef_Crest",
+                "Zone_Width_Reef_Flat",
+                # # # "Median_Depth_Fore_Reef",
+                 #"Median_Depth_Reef_Crest",
+                "Median_Depth_Reef_Flat",
+                # # # # "Max_Depth_Fore_Reef",
+                # "Max_Depth_Reef_Crest",
+                #"Max_Depth_Reef_Flat",
+                # # # # "Min_Depth_Fore_Reef",
+                 # "Min_Depth_Reef_Crest",
+                 "Min_Depth_Reef_Flat",
+                "Min_Reef_Depth",
+                 #"slope_Fore_Reef",
+                # "slope_Reef_Crest",
+                 #"slope_Reef_Flat",
+
+               # ### Model Output or Calculations ###
+               # "TWL1",              #Total water Level At Shore (i.e., model output location) ##Removed in favor of Ru1 due to conversation with Mike in Jan of 2023
+                "logit_WE_onshr1",   # Proportion of incoming wave energy arriving onshore (logit transformed)
+                "Ru1"
+               # # 
+               # # ### Reef Degradation Impact ###
+               # # #these variables calculate the relative impact of reef deepening by 1 m on model outputs
+                #"fold_TWL_Chng",       #Fold change in total water level at shoreline between current and degraded reefs bathymetry (-1 m)
+                #"fold_WE_onsh_Chg",     #Fold change in wave energy at shoreline between current and degraded reefs bathymetry (-1 m)
+                #"fold_Lf_Chng"
+               ) #Here I write which variables to include in the model
+
+
+#Rearrange data by selected variables and then save
+data <- data %>%
+  #dplyr::select(-AreaName,-X,-Uniq_ID,-...1, -Transect_Type,-Erosion_Data, -SRate_log)%>%
+  dplyr::select(all_of(kept_vars_F), everything())
+st_write(data, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-flat-sites.gpkg"), delete_layer = TRUE)
+write_csv(data,here("2_output", "dataframes","aggregated_data-flat-sites.csv") )
+
+## Non Aggregated Dataset
+Reef_data <- data %>%
+  #select(-AreaName,-X,-Uniq_ID,-...1, -Transect_Type,-Erosion_Data, -SRate_log)%>%
+  dplyr::select(all_of(kept_vars_F))%>%
+  na.omit()
+
+
+
+st_write(Reef_data, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-flat-sites-modeldata.gpkg"), delete_layer = TRUE)
+write_csv(Reef_data,here("2_output", "dataframes","aggregated_data-flat-sites-modeldata.csv") )
+rm(list = setdiff(ls(), "Reef_data"))
+```
+
+
+# Stepwise Model Selection With Outliers
+
+```{r StepWise Model Selection, message=FALSE, warning=FALSE}
+library(MASS)
+library(sjPlot)
+library(plotly)
+dataset<-st_drop_geometry(Reef_data)
+dataset <- dataset %>% ungroup()
+dependent_variable<-"SRate_wgt_mean"
+
+full <- glm (as.formula(paste(dependent_variable, "~ .")), family = gaussian, data = dataset)
+
+stepwise_model <- stepAIC(full, trace = FALSE)
+summary(stepwise_model)
+final_model<-lm(as.formula(paste(dependent_variable, "~ .")),data=stepwise_model$model)
+
+tab_model(final_model, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE,
+          show.r2 = TRUE)
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(stepwise_model, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+# coef_plot$sign <-c("Negative")
+# coef_plot$sign <- coef_plot %>% filter(estimate > 0)
+# coef_plot %>% mutate(test = ifelse(estimate < 0, "Negative", "Positive"))
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_stepwise_model<- coef_plot %>% 
+  dplyr::filter(p.value<=.5) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: Stepwise (+outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_stepwise_model
+
+final_terms<-coef_plot %>%
+  select(term) %>%
+  mutate(term=as.character(term))
+
+
+library(ggpubr)
+library(patchwork)
+
+# Initialize a list to store plots
+plots_list <- list()
+
+for (n in 1:length(final_terms$term)) {
+  term <- final_terms$term[n]
+  
+  plot <- dataset %>%
+    ggplot(aes(x = !!as.name(term), y = SRate_wgt_mean)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    stat_regline_equation(label.x = 0.1, label.y = 0.9, formula = y ~ x, label.tag = "adj.r.squared") +
+    stat_cor(label.x = 0.1, label.y = 0.85, label.sep = ", ")
+  
+  plots_list[[n]] <- plot
+}
+
+# Combine and display plots using patchwork
+print(wrap_plots(plots_list, ncol = 4))
+
+
+```
+
+```{r Plot Linear Relationships}
+library(sf)
+dataset<-Reef_data
+dataset <- dataset %>% ungroup()
+dependent_variable<-"SRate_wgt_mean"
+
+plot(st_drop_geometry(dataset))
+
+library(corrplot)
+corplot.data<-st_drop_geometry(dataset) %>%
+  select(where(is.numeric)) %>%
+  ungroup()
+
+xtr = corplot.data %>% dplyr::select(-dependent_variable)
+ytr = corplot.data %>% dplyr::select(dependent_variable)
+
+cor_numVar = cor(cbind(xtr, ytr), use="pairwise.complete.obs") # correlations of all numeric variables
+# sort on decreasing correlations     
+cor_sorted = as.matrix(sort(cor_numVar[, dependent_variable], decreasing = TRUE))
+  
+# select only high correlations
+CorHigh = names(which(apply(cor_sorted, 1, function(x) abs(x)>0.01)))
+# cor_numVar = cor_numVar[CorHigh, CorHigh]
+
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+ggsave("test.jpg")
+## Plot Correlated Variables
+dataset %>%
+  ggplot(aes(y=SRate_wgt_mean, x=Zone_Width_Reef_Flat))+
+  geom_point()+
+  stat_smooth()
+
+
+# Loading libraries
+library(ggplot2)
+library(reshape2)
+
+
+# Melt the matrix
+melted_corr_matrix <- melt(cor_numVar)
+
+# Filter to keep only upper triangle excluding the diagonal
+melted_corr_matrix <- melted_corr_matrix[upper.tri(cor_numVar, diag = FALSE), ]
+
+# Plotting heatmap using ggplot2
+p <- ggplot(data = melted_corr_matrix, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = ifelse(value > 0.7, sprintf("%.2f", value), "")), color = "black", size = 4) + 
+  scale_fill_gradient2(low="blue", high="red", mid="white", midpoint=0, limit=c(-1,1), space="Lab", name="Correlation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  labs(title = "Correlation Heatmap",
+       caption = "Source: Your Source")
+
+# Display the plot
+print(p)
+
+# Filter to keep only correlations > 0.7
+melted_corr_matrix <- melted_corr_matrix[abs(melted_corr_matrix$value) > 0.7, ]
+
+# Plotting heatmap using ggplot2
+p <- ggplot(data = melted_corr_matrix, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 4) +
+  scale_fill_gradient2(low="blue", high="red", mid="white", midpoint=0, limit=c(-1,1), space="Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  labs(title = "High Correlation Heatmap (|r| > 0.7)",
+       caption = "Source: Your Source")
+
+# Display the plot
+print(p)
+
+```
+
+```{r Build Model No Transformation}
+#select dataframe with relevant terms only
+final_terms<-final_terms %>%
+  rbind("SRate_wgt_mean")#add Srate to selected terms
+
+aic_selected_dataset <- dataset[, colnames(dataset) %in% final_terms$term] #select the columns of each term
+
+dataset<-aic_selected_dataset
+
+library(tidymodels)
+model_data<-st_drop_geometry(dataset) %>%
+   ungroup()
+  
+
+model_recipe <-
+    recipe(as.formula(paste(dependent_variable, "~ .")), data=model_data)%>%
+  step_center(all_numeric_predictors())%>%
+  step_scale(all_numeric_predictors())%>%
+  prep
+
+lm_spec <- linear_reg() %>% set_engine("lm")
+
+
+lm_fit <- fit(lm_spec, as.formula(paste(dependent_variable, "~ .")), data=bake(model_recipe, new_data = NULL))
+
+regression_data<- bake(model_recipe, new_data = NULL)
+
+tidy(lm_fit)
+summary(lm_fit$fit)
+
+
+```
+
+
+#### Plot Model Results
+```{r Plot Model Results}
+#install.packages('scico')
+library(scico)
+
+tidy(lm_fit)%>%
+  ggplot(aes(x=term, y=estimate, fill=p.value, color=p.value))+
+  geom_point()+
+  geom_bar(stat="identity")+
+  scale_fill_scico("p",palette = 'vik')+
+  scale_color_scico("p",palette = 'vik')+
+  coord_flip()+
+  labs(x="",y="estimate")
+
+
+#Plot Residuals
+hist(lm_fit$fit$residuals)
+
+{par(mfrow=c(2,2)) # plot all 4 plots in one
+
+plot(lm_fit$fit, 
+     pch = 16,    # optional parameters to make points blue
+     col = '#006EA1')
+}
+
+
+
+
+
+```
+
+
+
+#### Bootstrap Resampling of Linear Model
+
+```{r BootStrap Simple Regression}
+library(tidymodels)
+
+
+set.seed(1992)
+
+#GET CENTERED AND SCALED DATA for Regression
+data_boot <- model_data%>%
+    recipe(as.formula(paste(dependent_variable, "~ .")))%>%
+    step_center(all_numeric_predictors())%>%
+    step_scale(all_numeric_predictors())%>%
+    prep %>% 
+    bake(NULL)
+###
+  fit_lm_on_bootstrap <- function(split) {
+  linear_reg() %>%
+  set_engine("lm")%>%
+  fit(SRate_m ~., data=bake(model_recipe, new_data = NULL))
+}
+
+
+#Bootstrap Resample the centered and scaled data
+bootstrap_data<- bootstraps(data_boot, times=1000, apparent = TRUE)
+
+erosion_models <- bootstrap_data %>%
+  mutate(
+    model = map(splits, ~ lm(as.formula(paste(dependent_variable, "~ .")), data = .)),
+    coef_info = map(model, tidy))
+  
+
+
+
+erosion_coefs <- erosion_models %>%
+  unnest(coef_info)
+
+#glimpse(erosion_coefs)
+
+
+erosion_coefs <- erosion_coefs %>% filter(term != "(Intercept)")
+#erosion_coefs
+erosion_coefs<-as_tibble(erosion_coefs) %>%
+  select(-c(splits,model))
+
+
+library(rsample)
+conf_int<-int_pctl(erosion_models, coef_info, alpha = 0.05)
+
+conf_int<-conf_int%>% filter(term != "(Intercept)")
+conf_int<-as_tibble(conf_int)
+
+test<-left_join(erosion_coefs,conf_int, by="term")
+test <- test %>%
+  mutate(sig=if_else(p.value>0.05,">0.05","<0.05"))
+
+test %>%
+  ggplot(aes(x=estimate)) +
+  geom_histogram(position="identity", alpha=0.5, bins=15)+
+  labs(title="Bootstrap resample estimates with 95% confidence intervals",
+       x="Coefficient estimates",
+       y="Frequency")+
+    facet_wrap(~term, scales = "free")+
+  #shade_confidence_interval(endpoints = c(test$.lower,test$.upper), fill="gold", alpha=0.1, color=)
+  geom_vline(aes(xintercept=.lower))+
+  geom_vline(aes(xintercept=.upper))+
+  labs(title="Bootstrap resample estimates with 95% confidence intervals",
+       x="Coefficient estimates",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+### Plotting Bootstrap Coefficients
+library(scico)
+test%>%
+  ggplot(aes(x=term, y=estimate))+
+  geom_point(alpha=0.1, position=position_jitter(height=0, width=0.05), aes(color=sig)) +
+  stat_summary(fun=mean, geom="point", fill="red", pch=21, size=3)+ 
+  stat_summary(fun.data=mean_cl_normal, geometry="errorbar", 
+               width=1, colour="red", alpha=0.7) +
+  scale_color_viridis_d("p value",guide = guide_legend(override.aes = list(size = 3,
+                                                                    alpha = 1) ))+
+  coord_flip()+
+  labs(caption="Fig x. Coefficient estimates from 1000 bootstrap resamples. Red dot = mean. Errorbars = 95% Confidence intervals")
+
+
+```
+
+```{r Calculate Morans I 2}
+#install.packages("sfdep")
+library(tidymodels)
+library(sf)
+library(sfdep)
+library(dplyr)
+dataset <- Reef_data %>%
+  ungroup()
+dependent_variable<-"SRate_wgt_mean"
+
+# grab geometry
+
+geo <- st_geometry(Reef_data)
+
+# grab transformed and scaled data
+geo_data<-st_drop_geometry(dataset)%>%
+    recipe(as.formula(paste(dependent_variable, "~ .")))%>%
+    # step_center(all_numeric_predictors())%>%
+    # step_scale(all_numeric_predictors())%>%
+    prep %>% 
+    bake(NULL)
+
+#join geometry with data
+
+ geo_data_map<- dataset
+#save model residuals to our dataset
+geo_data_map$residuals<-final_model$fit
+
+#save file for external use
+st_write(geo_data_map, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-reefflat-reef-sites_model-outputs.gpkg"), delete_layer = TRUE)
+
+
+#### Calculating Neighbors ####
+#Calculate neighbors based on a distance band
+critical_threshold(st_geometry(geo_data_map))
+nb_dist <- st_dist_band(st_geometry(geo_data_map),  upper = critical_threshold(st_geometry(geo_data_map))) 
+
+#Calculate neighbors based on kneigherst neighbors
+nb_knear_8<- st_knn(geometry=st_geometry(geo_data_map), k = 8)
+
+
+#### Calculate Moran's I ####
+#*# Decide which neighbors to use
+neighbors <-nb_dist 
+
+#Create weights matrix
+wt <- st_weights(neighbors)
+
+#Compute the Moran I and Test to see if it is different from a random distribution
+moran<-sfdep::global_moran_test(geo_data_map$residuals,neighbors,wt)
+moran
+
+#Re-compute the Moran with a monte carlo simulation
+MC<-spdep::moran.mc(geo_data_map$residuals,spdep::nb2listw(neighbors,style = "C"), nsim=599)
+MC
+plot(MC,main="", las=1)
+
+#Extract Moran Data for Plotting
+moran_data<-spdep::moran.plot(geo_data_map$residuals,spdep::nb2listw(neighbors,style = "C"), return_df = TRUE, plot=FALSE)
+#trace(ggpubr:::.stat_lm, edit = TRUE) #https://stackoverflow.com/questions/66177005/im-using-stat-regline-equation-with-ggscatter-is-there-a-way-to-specify-the-si
+moran_data<-cbind(moran_data, geo_data_map)
+
+#Plot Moran Data
+moran_data %>%
+  ggplot(aes(x=x, y=wx, color=SRate_wgt_mean))+
+  geom_point()+
+  labs(x="Model Residuals", y="Spatially Lagged Residuals", caption=paste("Moran's I: ",round(moran$estimate[1],3)))+
+  geom_smooth(method= 'lm',formula = y~x, se = FALSE)+
+  geom_hline(yintercept = 0, linetype="dashed")+
+  geom_vline(xintercept = 0, linetype="dashed")+
+  scico::scale_color_scico("Shoreline Change Rate (m/yr)",midpoint = 0, palette = "roma")+
+  theme_dark()
+ggplotly()
+  # ggpubr::stat_regline_equation(mapping = NULL,
+  #                               data = NULL,
+  #                               formula = y ~ x,
+  #                               label.x.npc = "left",
+  #                               label.y.npc = "top",
+  #                               label.x = NULL,
+  #                               label.y = NULL,
+  #                               output.type = "expression",
+  #                               geom = "text",
+  #                               position = "identity",
+  #                               na.rm = FALSE,
+  #                               show.legend = NA,
+  #                               inherit.aes = TRUE)
+
+```

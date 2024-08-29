@@ -1,0 +1,200 @@
+---
+title: "Merging_Storlazzi_Transects"
+author: "Stephan Bitterwolf"
+date: "5/09/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# About this code
+
+The objective of this code is to merge Reef Model data to their respective transects and then to trim the transects so they stop at the shoreline.
+
+
+# Importing Data and Loading Libraries
+
+
+```{r Load Shapefiles}
+library(sf)
+library(here)
+Transects <- st_read(here("2_output", "modified_shapefiles","transects", "transects_merged.gpkg")) 
+Coasts <- st_read(here("0_data", "coast", "HawaiiLandEditedByBitterwolf.shp")) #This coast data is from the Hawaii Habitat files and was modified by Stephan Bitterwolf to remove island and artificial structures as well as correct any small coastline issues impacting reef transects and erosion points. The original maps can be found at this link: https://cdn.coastalscience.noaa.gov/datasets/e97/2007/shapes_benthic/Habitat_GIS_Data.zip
+Reefs <- st_read(here("2_output", "modified_shapefiles","reefs", "reefs_merged.gpkg")) 
+st_crs(Coasts) == st_crs(Transects)
+st_crs(Coasts)== st_crs(Reefs)
+```
+# Joining Reefs to Transects
+
+```{r Joining Reefs and Transects}
+library(ggspatial)
+library(sf)
+library(ggplot2)
+
+Reef_Transects<-st_join(Transects, st_buffer(Reefs,dist = .1), join = st_intersects) #Join the reef data to the Transect data. Note that a buffer of 0.1m was needed to ensure a spatial join.
+print(paste("Exactly: ", length(na.omit(Reef_Transects$reef_ID)), " Reef Values Joined to the 5472 available Transects"))
+
+rm(Transects)
+rm(Reefs)
+```
+
+# Triming Transects
+
+Here I merge trim transects so that they stop at the shore.
+```{r Trimming Transects, echo=TRUE}
+library(ggspatial)
+library(sf)
+library(ggplot2)
+##Plot data for a value that intersects the coast twice
+bbox <- st_bbox(st_geometry(Reef_Transects)[3429:3440])
+
+##sample start of the transect lines
+Transect_ends <- st_line_sample(Reef_Transects, sample=1)
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Reef_Transects[3429:3440,], size= 0.5)+
+  geom_sf(data = st_geometry(Transect_ends)[3429:3440], size = 1, color = "red")+
+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Transect Start Points are in Red")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+The above plot shows transects that intersect the coast multiple times. I only want to keep the original portion of the transects that extend from the red points to the coast. 
+
+I do this by cutting each transect with the shape of the coastline. This creates the splits shown below.
+
+```{r Transects 2}
+#Intersect Transects with Coastline
+Trimmed_Transects<-st_difference(Reef_Transects, st_union(st_geometry(Coasts)))
+
+#Cast all linestrings to multistring and then all multistring to linestring
+Trimmed_Transects_2 <-st_cast(st_cast(Trimmed_Transects, "MULTILINESTRING"),"LINESTRING")
+
+start <- 4062
+end <-start+19
+#Visualize to new transects
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = st_geometry(Transect_ends)[3429:3440], color = "red")+
+  geom_sf(data = Trimmed_Transects_2[start:end,], size = 1, aes(color = as.factor(row.names(Trimmed_Transects_2[start:end, ]))))+
+     scale_color_manual(values=c("#89C5DA", "#DA5724", "#74D944", "#CE50CA", "#3F4921", "#C0717C", "#CBD588", "#5F7FC7", 
+"#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030", "#AD6F3B", "#CD9BCD", 
+"#D14285", "#6DDE88", "#652926", "#7FDCC0", "#C84248", "#8569D5", "#5E738F", "#D1A33D", 
+"#8A7C64", "#599861"))+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Colors Show that Transects have been Split into Multiple Line Segments")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none")+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+Now that I have split my transects, I want to keep the portions touching the red circles.
+
+```{r Transects 3}
+#Save only blue lines touching red circles
+Transects_Final <- Trimmed_Transects_2 %>% st_filter(Transect_ends, .predicate = st_touches)
+
+#Visualize Blue Lines Touching Red Circles
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Transects_Final[3416:3423,], color = "black", size = 2)+
+  geom_sf(data = st_geometry(Transect_ends)[3429:3440 ], color = "red")+
+  geom_sf(data = Trimmed_Transects_2[3741:3760,], size = 1, aes(color = as.factor(row.names(Trimmed_Transects_2[3741:3760, ]))))+
+  scale_color_manual(values=c("#89C5DA", "#DA5724", "#74D944", "#CE50CA", "#3F4921", "#C0717C", "#CBD588", "#5F7FC7", 
+"#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030", "#AD6F3B", "#CD9BCD", 
+"#D14285", "#6DDE88", "#652926", "#7FDCC0", "#C84248", "#8569D5", "#5E738F", "#D1A33D", 
+"#8A7C64", "#599861"))+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("The Black Line Segments Touching Red Circles Were Kept")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none")+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+
+Now the transects have been split and the correct portion retained.
+```{r Transects 4}
+##Plot Final Transects
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Transects_Final[3365:3450,], size= 1)+
+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Final Transects Touch the Coast Only Once")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+
+At the end of this process we have lost 13 transects. This is because they were within Kaneohe Bay and their geometries started and ended within the island.Fortunately, there is no erosion data for these areas. Furthermore, their headings are not logical for modelling waves from the ocean onto shore. 
+```{r Lost Transects}
+
+start<-3362
+end<-start+12
+bbox <- st_bbox(st_geometry(Reef_Transects)[start:end])
+
+##sample start of the transect lines
+Transect_ends <- st_line_sample(Reef_Transects, sample=1)
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Reef_Transects[start:end,], size= 0.5)+
+  geom_sf(data = st_geometry(Transect_ends)[start:end], size = 1, color = "red")+
+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Lost Transects")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "br", width_hint = 0.2) +
+  annotation_north_arrow(location = "br", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+```
+
+
+
+```{r Save Transects}
+library(sf)
+library(tibble)
+Transects_Final <- rownames_to_column(Transects_Final, "Transects_ID")
+#The rownames will have periods with numbers following them to indicate transects that were bisecting land or anything like that. I remove the ".#" from the rownames here
+ # Remove any number following a period in the row names
+Transects_Final$Transects_ID <- sub("\\.\\d+$", "", Transects_Final$Transects_ID)
+
+
+
+st_write(Transects_Final, here("2_output","modified_shapefiles", "transects", "transects_final.gpkg"), delete_layer = TRUE )
+
+# 
+# weird_transects<-Transects_Final %>%
+#   mutate(Transects_Difference=as.numeric(Transects_Final$Transects_ID)-as.numeric(Transects_Final$trns_ID))
+# plot(weird_transects$Transects_Difference)
+```

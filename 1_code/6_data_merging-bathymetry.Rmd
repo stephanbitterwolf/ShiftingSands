@@ -1,0 +1,234 @@
+---
+title: "6. Merging Bathymetry"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r load libraries, message=FALSE, warning=FALSE}
+library(sf)
+library(raster)
+library(here)
+```
+
+```{r import data}
+Hawaii <- st_read(here("0_data", "coast", "HawaiiLandEditedByBitterwolf.shp"))
+Kauai_Bathymetry <- raster(here("0_data", "bathymetry", "kauai_10m_negdepths_UTM4N84.tif"))
+Oahu_Bathymetry <- raster(here("0_data", "bathymetry", "Oahu_10m_nonoaa.tif"))
+Maui_Bathymetry <- raster(here("0_data", "bathymetry", "MauiCandidate0524.tif"))
+
+crs(Kauai_Bathymetry)
+crs(Oahu_Bathymetry)
+crs(Maui_Bathymetry)
+st_crs(Hawaii)
+
+print("CRS are identical for the spatial data")
+
+#Join Rasters into 1 file
+# Check if the directory exists
+if (!dir.exists(here("2_output", "modified_rasters"))) {
+  # If it doesn't exist, create it
+  dir.create(here("2_output", "modified_rasters"), recursive = TRUE)
+} 
+library(terra)
+all_rasters <- c(here("0_data", "bathymetry", "kauai_10m_negdepths_UTM4N84.tif"), here("0_data", "bathymetry", "Oahu_10m_nonoaa.tif"), here("0_data", "bathymetry", "MauiCandidate0524.tif"))
+  ic <- sprc(lapply(all_rasters, rast))
+    r <- mosaic(ic)
+    terra::writeRaster(r,here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif"),overwrite=TRUE)
+rm(ic)
+rm(r)
+rm(Kauai_Bathymetry)
+rm(Maui_Bathymetry)
+rm(Oahu_Bathymetry)
+rm(Hawaii)
+```
+
+```{r Reclassify Depths -30m - 1m}
+library(raster)
+start_time <- Sys.time()
+Hawaii_Bathymetry <- raster(here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif"))
+
+#### Save depths from -30 to 1 m
+vals <- cbind(-Inf, -30, NA) #Replace all elevations less than -30 m with NA
+
+Bathymetry_reclass <- reclassify(Hawaii_Bathymetry, rcl = vals)
+
+vals <- cbind(1, Inf, NA) #Replace all elevations more than 2 m with NA
+Bathymetry_reclass <- reclassify(Bathymetry_reclass, rcl = vals)
+
+writeRaster(Bathymetry_reclass, file=here("2_output", "modified_rasters", "Hawaii_Bathymetry_-30_to_1.tif"), format="GTiff", overwrite=TRUE)
+
+# Record end time
+end_time <- Sys.time()
+
+# Calculate and print elapsed time
+elapsed_time <- end_time - start_time
+print(elapsed_time)
+```
+
+```{r Reclassify Depths -6m - 1m}
+library(raster)
+start_time <- Sys.time()
+Hawaii_Bathymetry <- raster(here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif"))
+
+#### Save depths from -6 to 2 m
+vals <- cbind(-Inf, -6, NA) #Replace all elevations less than -6 m with NA
+
+Bathymetry_reclass <- reclassify(Hawaii_Bathymetry, rcl = vals)
+
+vals <- cbind(1, Inf, NA) #Replace all elevations more than 1 m with NA
+Bathymetry_reclass <- reclassify(Bathymetry_reclass, rcl = vals)
+
+writeRaster(Bathymetry_reclass, file=here("2_output", "modified_rasters", "Hawaii_Bathymetry_-6_to_1.tif"), format="GTiff", overwrite=TRUE)
+
+# Record end time
+end_time <- Sys.time()
+
+# Calculate and print elapsed time
+elapsed_time <- end_time - start_time
+print(elapsed_time)
+```
+
+```{r Reclassify Depths -7m - 1m}
+library(raster)
+start_time <- Sys.time()
+Hawaii_Bathymetry <- raster(here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif"))
+
+#### Save depths from -7 to 2 m
+vals <- cbind(-Inf, -7, NA) #Replace all elevations less than -7 m with NA
+
+Bathymetry_reclass <- reclassify(Hawaii_Bathymetry, rcl = vals)
+
+vals <- cbind(1, Inf, NA) #Replace all elevations more than 1 m with NA
+Bathymetry_reclass <- reclassify(Bathymetry_reclass, rcl = vals)
+
+writeRaster(Bathymetry_reclass, file=here("2_output", "modified_rasters", "Hawaii_Bathymetry_-7_to_1.tif"), format="GTiff", overwrite=TRUE)
+
+# Record end time
+end_time <- Sys.time()
+
+# Calculate and print elapsed time
+elapsed_time <- end_time - start_time
+print(elapsed_time)
+```
+
+
+```{r Test}
+
+library(terra)
+library(here)
+library(parallel)
+
+raster_data <- rast(here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif"))
+
+# Define threshold value
+threshold_value <- 10  # replace with your desired threshold
+
+# Define the threshold function to filter out values below threshold
+threshold_function <- function(data) {
+    data[data < threshold_value] <- NA
+    return(data)
+}
+
+
+### test3
+
+# Number of chunks
+n <- 10  # replace with the number of chunks you want
+
+# Calculate the number of rows for each chunk
+nrows_per_chunk <- ceiling(nrow(raster_data) / n)
+
+
+# Get the extent of the raster
+rast_extent <- terra::ext(raster_data)
+
+# Calculate the span of each chunk vertically
+span <- (rast_extent[4] - rast_extent[3]) / n
+
+processed_chunks <- list()
+
+for (i in 1:n) {
+    # Calculate the top and bottom for this chunk
+    bottom <- rast_extent[3] + (i - 1) * span
+    top <- rast_extent[3] + i * span
+    
+    # Define the extent for this chunk
+    ext <- terra::ext(rast_extent[1], rast_extent[2], bottom, top)
+    
+    # Crop the raster based on this extent
+    chunk_data <- terra::crop(raster_data, ext)
+    
+    # Apply the threshold function to this chunk
+    processed_chunk <- threshold_function(chunk_data)
+    
+    processed_chunks[[i]] <- processed_chunk
+}
+
+# Combine processed chunks back into one raster
+final_processed_raster <- do.call(terra::merge, processed_chunks)
+
+
+terra::writeRaster(final_processed_raster, "processed_raster.tif", overwrite=TRUE)
+```
+
+```{r test parallel, eval=FALSE, include=FALSE}
+library(future)
+library(terra)
+library(here)
+
+# Use forked processing
+plan(multicore)
+
+# Define threshold value
+threshold_value <- 10  # replace with your desired threshold
+
+# Define the threshold function to filter out values below threshold
+threshold_function <- function(data) {
+    data[data < threshold_value] <- NA
+    return(data)
+}
+
+process_chunk <- function(i, rast_extent, raster_data, span) {
+    # Calculate the top and bottom for this chunk
+    bottom <- rast_extent[3] + (i - 1) * span
+    top <- rast_extent[3] + i * span
+    
+    # Define the extent for this chunk
+    ext <- terra::ext(rast_extent[1], rast_extent[2], bottom, top)
+    
+    # Crop the raster based on this extent
+    chunk_data <- terra::crop(raster_data, ext)
+    
+    # Apply the threshold function to this chunk
+    processed_chunk <- threshold_function(chunk_data)
+    
+    return(processed_chunk)
+}
+
+
+raster_data <- rast(here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif"))
+raster_data_path <- "/Users/stephan/Documents/reefs-and-erosion-hawaii/2_output/modified_rasters/Hawaii_Bathymetry.tif"
+
+raster_data <- rast(raster_data_path)
+# Number of chunks
+n <- 10  # replace with the number of chunks you want
+
+# Get the extent of the raster
+rast_extent <- terra::ext(raster_data)
+
+# Calculate the span of each chunk vertically
+span <- (rast_extent[4] - rast_extent[3]) / n
+
+# Use future_lapply to process each chunk in parallel
+processed_chunks <- future_lapply(1:n, process_chunk, rast_extent = rast_extent, raster_data = raster_data, span = span)
+
+
+```
+
+

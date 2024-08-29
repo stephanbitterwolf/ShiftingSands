@@ -1,0 +1,815 @@
+---
+title: "XBeach Output Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ncdf4)
+library(here)
+library(tidyverse)
+
+```
+
+# Non-Reef Data
+
+```{r code}
+
+#Import Non-Reef Data
+# Base directory where the simulations are stored
+baseDirectory <- here("7_XBEACH", "X_Beach_Simulations", "Wave_Transect_Project", "Non_Reef")
+
+# Sea level rise scenarios and wave heights
+seaLevelRises <- c("-0.25m", "0.00m", "0.25m", "0.50m")
+waveHeights <- c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")
+
+# Initialize an empty data frame to store E_max values
+emaxData <- data.frame()
+
+# Function to create the directory path
+createDirPath <- function(seaLevel, waveHeight) {
+  return(file.path(baseDirectory, 
+                   paste("Sea_Level_Rise", seaLevel, sep = "_"),
+                   paste("Wave_Height", waveHeight, sep = "_")))
+}
+
+# Loop through each scenario and wave height
+for (seaLevel in seaLevelRises) {
+  for (waveHeight in waveHeights) {
+    dirPath <- createDirPath(seaLevel, waveHeight)
+    filePath <- file.path(dirPath, "xboutput.nc")
+    print(filePath)
+    # Check if the file exists
+    if (file.exists(filePath)) {
+      # Load the NetCDF file
+      ncData <- nc_open(filePath)
+      
+      # Extract E_max variable (adjust the variable name if needed)
+      emaxDataTemp <- data.frame(SLR = seaLevel, WH = waveHeight, E_max = ncvar_get(ncData, "E_max"))
+      
+      # Bind the data to the main data frame
+      emaxData <- bind_rows(emaxData, emaxDataTemp)
+      
+      # Close the NetCDF file
+      nc_close(ncData)
+    }
+  }
+}
+
+# View the first few rows of emaxData
+head(emaxData)
+
+```
+
+```{r adding distance data}
+
+# Add a distance column based on row number within each group
+emaxData <- emaxData %>%
+  group_by(SLR, WH) %>%
+  mutate(Distance = (row_number() - 1) * 5 )%>%
+  mutate(WH = factor(WH, levels = c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")))
+
+# View the first few rows of emaxData with the distance column
+head(emaxData)
+
+```
+
+```{r plot wave data}
+library(plotly)
+
+selected_WH<-"2.0m"
+emaxData %>%
+  filter(WH==selected_WH)%>%
+  ggplot(aes(x=Distance, y=E_max, color=SLR))+
+  geom_line()+
+  labs(title="Wave Energy for non-reef transect for four different Sea Level Rise Scenarios",
+       x="Distance from -30m contour",
+       y="Maximum Wave Energy",
+       subtitle = paste("Wave Height: ",selected_WH ),
+       caption = paste("Wave Height: ",selected_WH ))
+ggplotly()
+
+
+emaxData %>%
+  ggplot(aes(x=Distance, y=E_max, color=SLR))+
+  geom_line()+
+  labs(title="Wave Energy for non-reef transect for four different Sea Level Rise Scenarios",
+       x="Distance from -30m contour",
+     y="Maximum Wave Energy")+
+  facet_wrap(~WH, scales = "free")
+```
+
+```{r saving non-reef data}
+non_reef_emax<-emaxData
+
+```
+# Reef Data
+
+```{r code reef}
+
+#Import Reef Data
+# Base directory where the simulations are stored
+baseDirectory <- here("7_XBEACH", "X_Beach_Simulations", "Wave_Transect_Project", "Reef")
+
+# Sea level rise scenarios and wave heights
+seaLevelRises <- c("-0.25m", "0.00m", "0.25m", "0.50m")
+waveHeights <- c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")
+
+# Initialize an empty data frame to store E_max values
+emaxData <- data.frame()
+
+# Function to create the directory path
+createDirPath <- function(seaLevel, waveHeight) {
+  return(file.path(baseDirectory, 
+                   paste("Sea_Level_Rise", seaLevel, sep = "_"),
+                   paste("Wave_Height", waveHeight, sep = "_")))
+}
+
+# Loop through each scenario and wave height
+for (seaLevel in seaLevelRises) {
+  for (waveHeight in waveHeights) {
+    dirPath <- createDirPath(seaLevel, waveHeight)
+    filePath <- file.path(dirPath, "xboutput.nc")
+    print(filePath)
+    # Check if the file exists
+    if (file.exists(filePath)) {
+      # Load the NetCDF file
+      ncData <- nc_open(filePath)
+      
+      # Extract E_max variable (adjust the variable name if needed)
+      emaxDataTemp <- data.frame(SLR = seaLevel, WH = waveHeight, E_max = ncvar_get(ncData, "E_max"))
+      
+      # Bind the data to the main data frame
+      emaxData <- bind_rows(emaxData, emaxDataTemp)
+      
+      # Close the NetCDF file
+      nc_close(ncData)
+    }
+  }
+}
+
+# View the first few rows of emaxData
+head(emaxData)
+
+```
+
+```{r adding distance data reef}
+
+# Add a distance column based on row number within each group
+emaxData <- emaxData %>%
+  group_by(SLR, WH) %>%
+  mutate(Distance = (row_number() - 1) * 5 )%>%
+  mutate(WH = factor(WH, levels = c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")))
+
+# View the first few rows of emaxData with the distance column
+head(emaxData)
+
+```
+
+```{r plot Reef wave data}
+library(plotly)
+
+selected_WH<-"2.0m"
+emaxData %>%
+  filter(WH==selected_WH)%>%
+  ggplot(aes(x=Distance, y=E_max, color=SLR))+
+  geom_line()+
+  labs(title="Wave Energy for non-reef transect for four different Sea Level Rise Scenarios",
+       x="Distance from -30m contour",
+       y="Maximum Wave Energy",
+       subtitle = paste("Wave Height: ",selected_WH ),
+       caption = paste("Wave Height: ",selected_WH ))
+ggplotly()
+
+
+emaxData %>%
+  ggplot(aes(x=Distance, y=E_max, color=SLR))+
+  geom_line()+
+  labs(title="Wave Energy for non-reef transect for four different Sea Level Rise Scenarios",
+       x="Distance from -30m contour",
+     y="Maximum Wave Energy")+
+  facet_wrap(~WH, scales = "free")
+```
+
+```{r saving reef data}
+reef_emax<-emaxData
+
+```
+
+#Comparing Reef and Non-Reef Transects
+
+```{r extracting correct depths}
+#These depths are the distances where the water shallows to less than 3m.
+non_reef_distance_3m<-1375
+reef_distance_3m<-1120
+
+non_reef_emax %>%
+  filter(Distance==non_reef_distance_3m) %>%
+  ggplot(aes(x=WH, y=E_max, color=SLR))+
+  geom_point()
+
+reef_emax %>%
+  filter(Distance==reef_distance_3m) %>%
+  ggplot(aes(x=WH, y=E_max, color=SLR))+
+  geom_point()
+
+
+
+#Calculate a percent change from base scenario
+
+##Non-Reef
+non_reef_energy_difference<-non_reef_emax %>%
+  filter(Distance==non_reef_distance_3m)%>%
+  group_by(WH)%>%
+  mutate(ref_emax=E_max[SLR == "0.00m"][1])%>%
+  group_by(WH, SLR)%>%
+  mutate(perc_energy_change=(((E_max-ref_emax)/ref_emax)*100))
+
+non_reef_energy_difference %>%
+  filter(Distance==non_reef_distance_3m) %>%
+  ggplot(aes(x=WH, y=perc_energy_change, color=SLR))+
+  geom_point()
+
+##Reef
+reef_energy_difference<-reef_emax %>%
+  filter(Distance==reef_distance_3m)%>%
+  group_by(WH)%>%
+  mutate(ref_emax=E_max[SLR == "0.00m"][1])%>%
+  group_by(WH, SLR)%>%
+  mutate(perc_energy_change=(((E_max-ref_emax)/ref_emax)*100))
+
+reef_energy_difference %>%
+  filter(Distance==reef_distance_3m) %>%
+  ggplot(aes(x=WH, y=perc_energy_change, color=SLR))+
+  geom_point()
+
+
+```
+
+
+```{r chatgpt functions}
+library(ncdf4)
+library(here)
+library(tidyverse)
+library(plotly)
+
+#Function 0: List Variables
+list_nc_variables <- function(file_path) {
+  if (!file.exists(file_path)) {
+    stop("File does not exist: ", file_path)
+  }
+  ncData <- nc_open(file_path)
+  var_names <- names(ncData$var)
+  nc_close(ncData)
+  return(var_names)
+}
+
+# Function 1: Import Data (Reef or Non-Reef)
+import_data <- function(reef_type, variable_name) {
+  baseDirectory <- here("7_XBEACH", "X_Beach_Simulations", "Wave_Transect_Project", reef_type)
+
+  seaLevelRises <- c("-0.25m", "0.00m", "0.25m", "0.50m")
+  waveHeights <- c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")
+
+  variableData <- data.frame()
+  for (seaLevel in seaLevelRises) {
+    for (waveHeight in waveHeights) {
+      dirPath <- file.path(baseDirectory, 
+                           paste("Sea_Level_Rise", seaLevel, sep = "_"),
+                           paste("Wave_Height", waveHeight, sep = "_"))
+      filePath <- file.path(dirPath, "xboutput.nc")
+      if (file.exists(filePath)) {
+        ncData <- nc_open(filePath)
+        dataTemp <- ncvar_get(ncData, variable_name)
+        nc_close(ncData)
+        # Dynamically naming the column
+        variableDataTemp <- data.frame(SLR = seaLevel, WH = waveHeight, setNames(list(dataTemp), variable_name))
+        variableData <- bind_rows(variableData, variableDataTemp)
+      }
+    }
+  }
+  return(variableData)
+}
+
+
+
+
+# Function 2: Select Variable and Add Distance
+select_variable_add_distance <- function(data, variable) {
+  data %>%
+    group_by(SLR, WH) %>%
+    mutate(Distance = (row_number() - 1) * 5) %>%
+    mutate(WH = factor(WH, levels = c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m"))) %>%
+    select(SLR, WH, Distance, !!as.name(variable))
+}
+
+# Function 3: Calculate Percent Change
+calculate_percent_change <- function(data, variable, distance_3m) {
+  # Define the variable as a symbol
+  variable_sym <- rlang::sym(variable)
+
+  # Create a temporary data frame to store reference values
+  ref_values <- data %>%
+    filter(Distance == distance_3m, SLR == "0.00m") %>%
+    group_by(WH) %>%
+    summarise(ref_value = first(!!variable_sym)) %>%
+    ungroup()
+
+  # Join the reference values back to the main data frame and calculate percent change
+  data %>%
+    filter(Distance == distance_3m) %>%
+    left_join(ref_values, by = "WH")%>%
+    group_by(WH, SLR) %>%
+    mutate(perc_change = ((!!variable_sym - ref_value) / ref_value) * 100)%>%
+    ungroup()
+}
+
+
+
+
+
+# Function 4: Plot Data
+plot_data <- function(data, variable, reef_type) {
+  ggplot(data, aes(x = WH, y = perc_change, color = SLR)) +
+    geom_point() +
+    labs(title = paste(reef_type, "Transect:", variable, "Percent Change"),
+         x = "Significant Wave Height",
+         y = "Percent Change in" ~ variable,
+         caption = paste("Data based on", reef_type, "transect")) +
+    theme_minimal()
+}
+
+
+# List variables
+file_path <- here("7_XBEACH", "X_Beach_Simulations", "Wave_Transect_Project", "Reef", "Sea_Level_Rise_0.00m", "Wave_Height_1.0m", "xboutput.nc")
+variables <- list_nc_variables(file_path)
+variables<-variables[5:length(variables)]
+print(variables)
+
+# Parameters for analysis
+reef_distance_3m <- 1120
+reef_type <- "Reef"  # or "Non_Reef"
+
+# Loop through each variable and perform analysis
+for (variable in variables) {
+  cat("Processing variable:", variable, "\n")
+
+  # Import data
+  data <- import_data(reef_type, variable)
+
+  # Select variable and add distance
+  data <- select_variable_add_distance(data, variable)
+
+  # Calculate percent change
+  data <- calculate_percent_change(data, variable, reef_distance_3m)
+
+  # Plot data
+  plot_data(data, variable, reef_type)
+}
+
+# Non-Reef Analysis
+non_reef_distance_3m<-1375
+reef_type <- "Non_Reef"
+variable <- "H_mean" # or any other variable in your dataset
+data <- import_data(reef_type,variable)
+data <- select_variable_add_distance(data, variable)
+data <- calculate_percent_change(data, variable, non_reef_distance_3m)
+plot_data(data, variable, reef_type)
+
+# Reef Analysis
+reef_distance_3m <- 1120
+reef_type <- "Reef"  # or "Non_Reef"
+variable <- "H_mean" # or any other variable in your dataset
+data <- import_data(reef_type,variable)
+data <- select_variable_add_distance(data, variable)
+data <- calculate_percent_change(data, variable, reef_distance_3m)
+plot_data(data, variable, reef_type)
+
+```
+
+
+```{r chatgpt code 2}
+# Loading necessary libraries
+library(ncdf4)
+library(here)
+library(tidyverse)
+library(plotly)
+
+# Function 0: List Variables
+list_nc_variables <- function(file_path) {
+  if (!file.exists(file_path)) {
+    stop("File does not exist: ", file_path)
+  }
+  ncData <- nc_open(file_path)
+  var_names <- names(ncData$var)
+  nc_close(ncData)
+  return(var_names)
+}
+
+# Function 1: Import Data (Reef or Non-Reef)
+import_data <- function(reef_type, variable_name) {
+  baseDirectory <- here("7_XBEACH", "X_Beach_Simulations", "Wave_Transect_Project", reef_type)
+
+  seaLevelRises <- c("-0.25m", "0.00m", "0.25m", "0.50m")
+  waveHeights <- c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")
+
+  variableData <- data.frame()
+  for (seaLevel in seaLevelRises) {
+    for (waveHeight in waveHeights) {
+      dirPath <- file.path(baseDirectory, 
+                           paste("Sea_Level_Rise", seaLevel, sep = "_"),
+                           paste("Wave_Height", waveHeight, sep = "_"))
+      filePath <- file.path(dirPath, "xboutput.nc")
+      if (file.exists(filePath)) {
+        ncData <- nc_open(filePath)
+        dataTemp <- ncvar_get(ncData, variable_name)
+        nc_close(ncData)
+        # Dynamically naming the column and adding ReefType
+        variableDataTemp <- data.frame(SLR = seaLevel, WH = waveHeight, 
+                                       setNames(list(dataTemp), variable_name),
+                                       ReefType = reef_type)
+        variableData <- bind_rows(variableData, variableDataTemp)
+      }
+    }
+  }
+  return(variableData)
+}
+
+# Function 2: Select Variable and Add Distance
+select_variable_add_distance <- function(data, variable) {
+  data %>%
+    group_by(SLR, WH, ReefType) %>%
+    mutate(Distance = (row_number() - 1) * 5) %>%
+    mutate(WH = factor(WH, levels = c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m"))) %>%
+    select(SLR, WH, Distance, !!as.name(variable), ReefType)
+}
+
+# Function 3: Calculate Percent Change
+calculate_percent_change <- function(data, variable, distance_3m) {
+  # Define the variable as a symbol
+  variable_sym <- rlang::sym(variable)
+
+  # Calculate percent change
+  data <- data %>%
+    filter(Distance == distance_3m) %>%
+    group_by(WH, ReefType) %>%
+    mutate(ref_value = if_else(SLR == "0.00m", !!variable_sym, NA_real_)) %>%
+    fill(ref_value, .direction = "downup") %>%
+    ungroup() %>%
+    mutate(perc_change = ((!!variable_sym - ref_value) / ref_value) * 100)
+
+  # Convert to long format before selecting
+  data_long <- data %>%
+    pivot_longer(
+      cols = all_of(variable),
+      names_to = "variable",
+      values_to = "value"
+    ) %>%
+    select(SLR, WH, Distance, ReefType, variable, perc_change)
+
+  return(data_long)
+}
+
+
+
+# Function 4: Plot Data
+plot_data <- function(data, variable) {
+  ggplot(data, aes(x = WH, y = perc_change, color = SLR)) +
+    geom_point() +
+    facet_wrap(~ ReefType, scales = "free", ncol = 1) +
+    labs(title = paste("Transect:", variable, "Percent Change"),
+         x = "Significant Wave Height",
+         y = "Percent Change in" ~ variable,
+         caption = "Data based on Reef and Non-Reef transects") +
+    theme_minimal()
+}
+
+# Main Workflow
+file_path <- here("7_XBEACH", "X_Beach_Simulations", "Wave_Transect_Project", "Reef", "Sea_Level_Rise_0.00m", "Wave_Height_1.0m", "xboutput.nc")
+variables <- list_nc_variables(file_path)
+variables <- variables[5:length(variables)]  # Adjust the range as needed
+print(variables)
+
+# Parameters for analysis
+reef_distance_3m <- 1120
+non_reef_distance_3m <- 1375
+
+reef_distance_2m <- 1690
+non_reef_distance_2m <- 1375 #1375 is -3m but it goes to -0.5 m at 1380
+
+#Store output depth location
+output_depth_reef <- reef_distance_2m
+output_depth_non_reef <- non_reef_distance_2m
+
+
+# Process and Combine Reef and Non-Reef Data for each variable
+all_data_long <- data.frame()
+
+for (variable in variables) {
+  cat("Processing variable:", variable, "\n")
+
+  # Process and combine reef and non-reef data for each variable
+  combined_data <- bind_rows(
+    import_data("Reef", variable) %>% 
+      select_variable_add_distance(variable) %>% 
+      calculate_percent_change(variable, output_depth_reef),
+    import_data("Non_Reef", variable) %>% 
+      select_variable_add_distance(variable) %>% 
+      calculate_percent_change(variable, output_depth_non_reef)
+  )
+
+  all_data_long <- bind_rows(all_data_long, combined_data)
+}
+
+# Now all_data_long is in a long format with 'variable' and 'perc_change' columns
+
+
+plot_data <- function(data, selected_variables) {
+  # Filter data based on the selected variables
+  filtered_data <- data %>%
+    filter(variable %in% selected_variables)
+
+  # Plot
+  ggplot(filtered_data, aes(x = WH, y = perc_change, color = SLR)) +
+    geom_point() +
+    facet_grid(variable ~ ReefType, scales = "free_y") +
+    labs(title = "Percent Change by Variable and Reef Type",
+         x = "Significant Wave Height",
+         y = "Percent Change",
+         color = "Sea Level Rise") +
+    theme_minimal() +
+    theme(strip.text.x = element_text(angle = 0, hjust = 1))
+}
+
+# Example of plotting a single variable
+plot_data(all_data_long, selected_variables = c("H_mean"))
+
+# Example of plotting multiple variables
+plot_data(all_data_long, selected_variables = c("H_mean", "E_mean", "Sxx_mean"))
+
+
+
+```
+
+
+
+```{r GeomRibbon}
+
+
+plot_data_ribbon <- function(data, selected_variables) {
+  # Filter out the reference SLR scenario and filter data based on the selected variables
+  filtered_data <- data %>%
+    filter(variable %in% selected_variables, SLR != "0.00m")
+
+  # Define the plot with a base ggplot object
+  p <- ggplot(filtered_data, aes(x = WH, ymin = 0, ymax = perc_change, fill = SLR, group = SLR)) +
+    facet_grid(variable ~ ReefType) +
+    labs(title = "Percent Change by Variable and Reef Type Relative to Current Sea Level",
+         x = "Significant Wave Height",
+         y = "Percent Change Relative to Current Sea Level") +
+    theme(strip.text.x = element_text(size=12, angle = 0, hjust = 0.5),
+          strip.text.y = element_text(size=12, angle = -90, hjust = 0.5),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          legend.position = "bottom",
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+  # Add ribbons for each SLR level individually to prevent overlap
+  # The order here is important to ensure that larger values are plotted behind smaller ones
+  slr_levels <- c("0.50m", "0.25m", "-0.25m")  # Ordered by descending SLR value
+  for (slr in slr_levels) {
+    p <- p + geom_ribbon(data = filtered_data %>% filter(SLR == slr),
+                         aes(ymin = 0, ymax = perc_change),
+                         alpha = 1)
+  }
+
+  # Use a distinct color palette
+  p <- p + scale_fill_viridis_d() # Use a color palette that is distinct
+
+  return(p)
+}
+
+# Example of plotting a single variable
+plot_data_ribbon(all_data_long, selected_variables = c("E_mean"))+
+labs(title = "Impact of Sea Level Rise on Wave Energy by Habitat Type",
+         x = "Significant Wave Height",
+         y = "Percent Change Relative to Current Sea Level") 
+  
+dir.create(here("3_report", "xbeach_transect_comparison_SLR"))
+figure_size <- 700
+ggsave(here("3_report", "xbeach_transect_comparison_SLR", "xbeach_comparison.jpg"), width = 4 * figure_size, height = 3 * figure_size, dpi = 300, units = "px", limitsize = FALSE)
+
+# Example of plotting multiple variables
+plot_data_ribbon(all_data_long, selected_variables = c("H_mean", "E_mean", "Sxx_mean"))
+
+# Assuming all_data_long is your combined long-format data for both reef and non-reef transects
+
+# Step 1: Spread data to wide format to separate reef and non-reef
+wide_data <- all_data_long %>%
+  filter(SLR != "0.00m") %>%
+  spread(ReefType, perc_change)
+
+# Step 2: Calculate the difference between reef and non-reef percent changes
+difference_data <- wide_data %>%
+  mutate(Difference = Reef - Non_Reef) %>%
+  select(SLR, WH, variable, Difference)
+
+# Step 3: Gather the data back into long format if needed
+long_difference_data <- difference_data %>%
+  gather(key = "TransectType", value = "Value", -SLR, -WH, -variable)
+
+# Step 4: Filter out the necessary variables for plotting
+selected_variables <- c("H_mean", "AnotherVariable")  # specify your variables here
+plotting_data <- long_difference_data %>%
+  filter(variable %in% selected_variables)
+
+plot_difference <- function(data) {
+  ggplot(data, aes(x = WH, y = Value, color = SLR, group = SLR)) +
+    geom_line() +  # Change to geom_line to show the differences clearly
+    facet_wrap(~variable, scales = "free_y", ncol = 1) +
+    labs(title = "Difference in Percent Change Between Reef and Non-Reef",
+         x = "Significant Wave Height",
+         y = "Difference in Percent Change",
+         color = "Sea Level Rise") +
+    theme_minimal() +
+    theme(strip.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          legend.position = "bottom") +
+    scale_color_brewer(palette = "Spectral")  # Use a color palette that is distinct
+}
+
+# Plot the differences for selected variables
+plot_difference(plotting_data)
+
+
+```
+
+
+```{r MultiTransect Functions}
+
+# Loading necessary libraries
+library(ncdf4)
+library(here)
+library(tidyverse)
+library(plotly)
+
+# Function 0: List Variables
+list_nc_variables <- function(file_path) {
+  if (!file.exists(file_path)) {
+    stop("File does not exist: ", file_path)
+  }
+  ncData <- nc_open(file_path)
+  var_names <- names(ncData$var)
+  nc_close(ncData)
+  return(var_names)
+}
+
+import_data <- function(baseDirectory, variable_name) {
+  reef_types <- c("reef", "non-reef")
+  seaLevelRises <- c("-0.25m", "0.00m", "0.25m", "0.50m")
+  waveHeights <- c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m")
+
+  variableData <- data.frame()
+
+  for (reef_type in reef_types) {
+    transect_nums <- dir(file.path(baseDirectory, reef_type))  # Get transect numbers for each reef type
+    for (transect in transect_nums) {
+      for (seaLevel in seaLevelRises) {
+        for (waveHeight in waveHeights) {
+          dirPath <- file.path(baseDirectory, reef_type, transect, paste("Sea_Level_Rise", seaLevel, sep = "_"), paste("Wave_Height", waveHeight, sep = "_"))
+          filePath <- file.path(dirPath, "xboutput.nc")
+          if (file.exists(filePath)) {
+            ncData <- nc_open(filePath)
+            dataTemp <- ncvar_get(ncData, variable_name)
+            nc_close(ncData)
+            
+            # Check if the distance at 2m file exists
+            distanceFilePath <- file.path(dirPath, paste0("closest_point_to_minus_2m.csv"))
+            if (file.exists(distanceFilePath)) {
+              # Import the distance at 2m data
+              closest_point_data <- read.csv(distanceFilePath)
+              distance_to_2m_depth <- closest_point_data$xbeach_distance
+            } else {
+              distance_to_2m_depth <- NA
+            }
+            
+            variableDataTemp <- data.frame(
+              ReefType = reef_type,
+              Transect = transect,
+              SLR = seaLevel,
+              WH = waveHeight,
+              distance_to_2m_depth = distance_to_2m_depth,  # Add the depth at 2 meters from the imported file
+              setNames(list(dataTemp), variable_name)
+            )
+            variableData <- bind_rows(variableData, variableDataTemp)
+          }
+        }
+      }
+    }
+  }
+  return(variableData)
+}
+
+# Function 2: Select Variable and Add Distance
+select_variable_add_distance <- function(data, variable) {
+  data %>%
+    group_by(Transect, SLR, WH, ReefType) %>%
+    mutate(Distance = (row_number() - 1) * 5) %>%
+    mutate(WH = factor(WH, levels = c("1.0m", "2.0m", "3.0m", "4.0m", "5.0m", "6.0m", "7.0m", "8.0m", "9.0m", "10.0m", "11.0m", "12.0m"))) %>%
+    select(Transect, SLR, WH, Distance, !!as.name(variable), ReefType, distance_to_2m_depth)
+}
+
+# Function 3: Calculate Percent Change
+calculate_percent_change <- function(data, variable) {
+  # Define the variable as a symbol
+  variable_sym <- rlang::sym(variable)
+
+  # Calculate percent change
+  data <- data %>%
+    filter(Distance == distance_to_2m_depth) %>%
+    group_by(Transect, WH, ReefType) %>%
+    mutate(ref_value = if_else(SLR == "0.00m", !!variable_sym, NA_real_)) %>%
+    fill(ref_value, .direction = "downup") %>%
+    ungroup() %>%
+    mutate(perc_change = ((!!variable_sym - ref_value) / ref_value) * 100)
+
+  # Convert to long format before selecting
+  data_long <- data %>%
+    pivot_longer(
+      cols = all_of(variable),
+      names_to = "variable",
+      values_to = "value"
+    ) %>%
+    select(Transect,SLR, WH, Distance, ReefType, variable, perc_change)
+
+  return(data_long)
+}
+
+
+
+# Function 4: Plot Data
+plot_data <- function(data, variable) {
+  ggplot(data, aes(x = WH, y = perc_change, color = SLR)) +
+    geom_point() +
+    facet_wrap(~ ReefType, scales = "free", ncol = 1) +
+    labs(title = paste("Transect:", variable, "Percent Change"),
+         x = "Significant Wave Height",
+         y = "Percent Change in" ~ variable,
+         caption = "Data based on Reef and Non-Reef transects") +
+    theme_minimal()
+}
+
+
+# Example usage
+ baseDirectory <- here("7_XBEACH","Multi_Transect-Output") # Replace with your base directory path
+ variables <- list_nc_variables(file.path(baseDirectory, "reef", "Transect_1563", "Sea_Level_Rise_0.00m", "Wave_Height_1.0m", "xboutput.nc"))
+ variables <- variables[5:length(variables)]
+ all_data <- import_data(baseDirectory, variables[2])  
+ 
+ # Process and Combine Reef and Non-Reef Data for each variable
+all_data_long <- data.frame()
+
+for (variable in variables) {
+  cat("Processing variable:", variable, "\n")
+
+  # Process and combine reef and non-reef data for each variable
+  combined_data <- bind_rows(
+    import_data(baseDirectory, variable) %>% 
+      select_variable_add_distance(variable) %>% 
+      calculate_percent_change(variable)
+  )
+
+  all_data_long <- bind_rows(all_data_long, combined_data)
+}
+
+```
+
+```{r PLot MultiTransect}
+plot_data <- function(data, selected_variables) {
+  # Filter data based on the selected variables
+  filtered_data <- data %>%
+    filter(variable %in% selected_variables)
+
+  # Plot
+  ggplot(filtered_data, aes(x = WH, y = perc_change, color = SLR)) +
+    geom_boxplot() +
+    facet_grid(variable ~ ReefType, scales = "free_y") +
+    labs(title = "Percent Change by Variable and Reef Type",
+         x = "Significant Wave Height",
+         y = "Percent Change",
+         color = "Sea Level Rise") +
+    theme_minimal() +
+    theme(strip.text.x = element_text(angle = 0, hjust = 1))
+}
+
+# Example of plotting a single variable
+plot_data(all_data_long, selected_variables = c("E_mean"))
+all_data_long %>%
+  filter(variable=="E_mean")%>%
+  group_by(ReefType, SLR, WH)%>%
+  summarise(mean_change=mean(perc_change))%>%
+  ggplot(aes(x=WH, y=mean_change, color=SLR))+
+  geom_point()+
+  facet_wrap(~ReefType)
+```

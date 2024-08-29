@@ -1,0 +1,693 @@
+---
+title: "14_XBeach_Transects"
+output: html_document
+date: "2023-12-07"
+---
+
+This code is meant for extracting transect depths for a characteristic Reef and Non-Reef profile. The transect will be used to determine the percent increase in onshore wave energy incurred from 0.25m increase in sea level height and potentially also from reduced friction due to reef degradation.
+
+
+I want to sample transect IDs: Reef (283, 1563, 1877, 1901, 3190, 4936, 4949) and Non-Reef (2131, 2181, 3172, 3659, 4931, 4960, 4970). These were chosen from visual inspection of the transects in qgis.
+
+# Import Data
+
+```{r Load Data}
+library(sf)
+library(raster)
+library(here)
+library(tidyverse)
+
+Hawaii_Bathymetry <- raster(here("2_output", "modified_rasters", "Hawaii_Bathymetry.tif")) ##Choose which file you want to use for depths. I will use the -30 to 1 m file and then later remove offshore depths greater than 7 m deep.
+  
+  
+Hawaii_Transects <- st_read(here("2_output", "modified_shapefiles","transects" , "transects_merged.gpkg"))
+Hawaii_Transects<-Hawaii_Transects%>%
+  dplyr::select(trns_ID,island) %>%
+  distinct()
+
+Selected_Transects<- c(283, 1563, 1877, 1901, 3190, 4936, 4949, 2131, 2181, 3172, 3659, 4931, 4960, 4970)
+
+Chosen_Transects<-Hawaii_Transects%>%
+  filter(trns_ID %in% Selected_Transects)
+
+{plot(Hawaii_Bathymetry)
+plot(Chosen_Transects, add = TRUE)}
+
+```
+
+# Extract Depth Data
+
+Here I use qgis and R to extract depths from a raster file using the transects as the extraction location. I use 5 m spacing because the raster bathymetry file has a 5 m resolution.
+
+```{r Extract Depths}
+# install.package("remotes")
+#remotes::install_github("JanCaha/r_package_qgis")
+library(qgis)
+
+#Sample along transects at 5 m intervals
+result<-qgis::qgis_densifygeometriesgivenaninterval(INPUT = Chosen_Transects,
+                                                    INTERVAL = 5) %>% st_as_sf()
+
+# st_write(result,here("result.gpkg"), delete_layer=TRUE)
+
+#Extract the vertices from the 5 m sampling
+vertices<-qgis::qgis_extractvertices(result)%>% st_as_sf()
+
+# st_write(vertices,here("vertices.gpkg"), delete_layer=TRUE)
+
+#Sample the raster at each of the 5 m points
+sampled<-qgis::qgis_rastersampling(INPUT=vertices, RASTERCOPY = Hawaii_Bathymetry)%>% st_as_sf()
+
+# st_write(sampled,here("sampled.gpkg"), delete_layer=TRUE)
+# Check if the directory exists
+if (!dir.exists(here("2_output", "modified_shapefiles", "xbeach"))) {
+  # If it doesn't exist, create it
+  dir.create(here("2_output", "modified_shapefiles", "xbeach"), recursive = TRUE)
+} 
+
+#write the sampled data
+st_write(sampled, here("2_output", "modified_shapefiles", "xbeach", "xbeach_transects.gpkg"), delete_layer=TRUE)
+```
+
+# Define Functions To Process and Export Data
+
+Here I create multiple functions to process each transect and create the files required for xbeach simulations. The functions select a depth range from -30 to 10 m, add distance along transect starting at the offshore -30m depth, and add columns needed for xbeach simulation like bed_friction, fw, etc. These are then processed and saved as individual files. A params.txt file is created that is altered to be specific for each transect. These functions will ultimately create multiple folders (one for each transect) and place the required xbeach files inside. You can alter these functions to change the starting wave height, tides, etc. However, I automate this process later using powershell code (see end of rmarkdown document).
+
+
+```{r functions}
+
+process_transect_data <- function(sampled, transect_id) {
+  chosen_transect <- sampled %>%
+    filter(trns_ID == transect_id) %>%
+    dplyr::select(trns_ID, distance, SAMPLE_1) %>%
+    mutate(Distance = round(distance, digits = 0),
+           Depth = round(SAMPLE_1, digits = 3),
+           .keep = "unused") %>%
+    filter(!is.na(Depth)) %>%
+    arrange(-Distance) %>%
+    filter(Depth >= -30, Depth <= 10) %>%
+    mutate(xbeach_distance = (row_number() * 5 - 5),
+           bed_friction = 0.01,
+           fw = 0.1)
+
+  return(chosen_transect)
+}
+
+chosen_transect<- process_transect_data(sampled, 283)
+
+write_2m_depth_distance <- function(chosen_transect, output_dir){
+  closest_point_to_minus_2m <- chosen_transect %>%
+    arrange(xbeach_distance)%>%
+    filter(Depth <= -2) %>%
+    slice_max(xbeach_distance,n=1)  # Select the first row after sorting in descending order by Distance
+
+# Define the filename for export
+  file_name <- paste0("closest_point_to_minus_2m.csv")
+
+  # Define the full path for the file
+  file_path <- file.path(output_dir, file_name)
+
+  # Export the data to the specified directory
+  write.csv(closest_point_to_minus_2m, file_path, row.names = FALSE)
+
+  return(closest_point_to_minus_2m)}
+
+write_dep_file <- function(chosen_transect, transect_id, output_dir) {
+  depth_data <- chosen_transect$Depth
+  dep_file_name <- paste0("depth.dep")
+  file_path <- file.path(output_dir, dep_file_name)
+  
+  file_conn <- file(file_path, "w")
+  tryCatch({
+    write(paste(depth_data, collapse = " "), file_conn)
+    write(paste("0.000", collapse = " "), file_conn)
+  }, finally = {
+    close(file_conn)
+  })
+}
+
+write_x_grid_file <- function(chosen_transect, transect_id, output_dir) {
+  x_data <- c(" ", chosen_transect$xbeach_distance)
+  x_grid_file_name <- paste0("x.grd")
+  file_path <- file.path(output_dir, x_grid_file_name)
+  
+  file_conn <- file(file_path, "w")
+  tryCatch({
+    write(paste(x_data, collapse = " "), file_conn)
+  }, finally = {
+    close(file_conn)
+  })
+}
+
+
+write_y_grid_file <- function(chosen_transect, transect_id, output_dir) {
+  Y_data <- rep(0.000, length(chosen_transect$Depth))
+  y_grid_file_name <- paste0("y.grd")
+  file_path <- file.path(output_dir, y_grid_file_name)
+  
+  file_conn <- file(file_path, "w")
+  tryCatch({
+    write(paste(Y_data, collapse = " "), file_conn)
+  }, finally = {
+    close(file_conn)
+  })
+}
+
+
+write_bedfriction_file <- function(chosen_transect, transect_id, output_dir) {
+  bed_data <- c(" ", chosen_transect$bed_friction)
+  bedfric_file_name <- paste0("bedfricfile.txt")
+  file_path <- file.path(output_dir, bedfric_file_name)
+  
+  file_conn <- file(file_path, "w")
+  tryCatch({
+    write(paste(bed_data, collapse = " "), file_conn)
+  }, finally = {
+    close(file_conn)
+  })
+}
+
+
+write_fw_file <- function(chosen_transect, transect_id, output_dir) {
+  fw_data <- c(" ", chosen_transect$fw)
+  fw_file_name <- paste0("fwfile.txt")
+  file_path <- file.path(output_dir, fw_file_name)
+  
+  file_conn <- file(file_path, "w")
+  tryCatch({
+    write(paste(fw_data, collapse = " "), file_conn)
+  }, finally = {
+    close(file_conn)
+  })
+}
+
+
+# Function to plot distance vs depth and save the plot
+plot_distance_vs_depth <- function(data, output_directory) {
+  # Create the plot using ggplot2
+  transect<- unique(data$trns_ID)
+  p <- ggplot(data, aes(x = xbeach_distance, y = Depth)) +
+    geom_point() +
+    labs(x = "Cross Shore Distance (m)", y = "Depth (m)", title = paste0("Distance vs Depth Plot: ", transect))
+
+  # Construct the file path
+  file_path <- file.path(output_directory, "distance_vs_depth_plot.png")
+
+  # Save the plot
+  ggsave(file_path, plot = p, width = 10, height = 6)
+
+  return(file_path)
+}
+
+   create_params_file <- function(transect_id, chosen_transect, output_dir) {
+    # Calculate the nx value
+    nx <- length(chosen_transect$Distance)-1
+
+    # Construct the file name
+    depfile_name <- paste0("depth.dep")
+    x_grid_file_name <- paste0("x.grd")
+    y_grid_file_name <- paste0("y.grd")
+    bedfric_file_name <- paste0("bedfricfile.txt")
+    fw_file_name <- paste0("fwfile.txt")
+
+    # Assemble the content of the params file
+    params_content <- c(
+    "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "%%% XBeach parameter settings input file                                     %%%",
+    "%%%                                                                          %%%",
+    "%%% date:     13-Apr-2022 15:37:11                                           %%%",
+    "%%% function: xb_write_params                                                %%%",
+    "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "%%% Flow boundary condition parameters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "front          = abs_1d",
+    "left           = wall",
+    "right          = wall",
+    "back           = wall",
+    "",
+    "%%% Flow parameters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "bedfriction    = cf",
+    sprintf("bedfricfile    = %s", bedfric_file_name),
+    "",
+    "%%% General %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    sprintf("fwfile         = %s", fw_file_name),
+    "rotate         = 0",
+    "wavemodel      = surfbeat",
+    "",
+    "%%% Grid parameters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    sprintf("depfile        = %s", depfile_name),
+    "posdwn         = -1",
+    sprintf("nx             = %d", nx),
+    "ny             = 0",
+    "alfa           = 0",
+    "vardx          = 1",
+    "dy             = 0",
+    sprintf("xfile          = %s", x_grid_file_name),
+    sprintf("yfile          = %s", y_grid_file_name),
+    "xori           = 0",
+    "yori           = 0",
+    "thetamin       = 0",
+    "thetamax       = 360",
+    "dtheta         = 360",
+    "thetanaut      = 1",
+    "",
+    "%%% Model time %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "tstop          = 9000",
+    "",
+    "%%% Physical processes %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "sedtrans       = 0",
+    "morphology     = 0",
+    "",
+    "%%% Tide boundary conditions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "zs0file        = tide.txt",
+    "tideloc        = 1",
+    "",
+    "%%% Wave boundary condition parameters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "wbctype        = parametric",
+    "instat         = jons",
+    "",
+    "%%% Wave-spectrum boundary condition parameters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "bcfile         = jonswap.txt",
+    "",
+    "%%% Output variables %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%",
+    "",
+    "outputformat   = netcdf",
+    "tintm          = 7500",
+    "tintg          = 7500",
+    "tstart         = 1500",
+    "",
+    "nglobalvar     = 1",
+    "H",
+    "",
+    "nmeanvar       = 7",
+    "H",
+    "zs",
+    "E",
+    "Sxx",
+    "zb",
+    "u",
+    "taubx",
+    "",
+    "npointvar      = 5",
+    "zb",
+    "zs",
+    "u",
+    "H",
+    "E"
+)
+
+
+   # Write the content to the output file
+    output_file_path <- file.path(output_dir, "params.txt")
+    writeLines(params_content, output_file_path)
+   }
+   
+   create_jonswap_file <- function(output_dir) {
+  # Define the content to be written to the file
+  jonswap_content <- c(
+    "Hm0        = 4",
+    "fp         = 0.044721",
+    "mainang    = 270",
+    "gammajsp   = 3.3",
+    "s          = 10000",
+    "fnyq       = 0.13416"
+  )
+
+  # Construct the full path to the file
+  file_path <- file.path(output_dir, "jonswap.txt")
+
+  # Write the content to the file
+  writeLines(jonswap_content, file_path)
+}
+  create_tide_file <- function(output_dir) {
+  # Hardcoded file name
+  file_name <- "tide.txt"
+
+  # Define the content to be written to the file
+  tide_content <- c(
+    "0.0000000e+00   4.8291732e-01",
+    "9.1000000e+03   4.8291732e-01"
+  )
+
+  # Construct the full path to the file
+  file_path <- file.path(output_dir, file_name)
+
+  # Write the content to the file
+  writeLines(tide_content, file_path)
+}
+  process_and_write_transect_files <- function(sampled, transect_id, output_dir) {
+  # Process the transect data
+  chosen_transect <- process_transect_data(sampled, transect_id)
+
+  # Ensure output directory exists
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+
+  # Write different files based on the processed data
+  write_dep_file(chosen_transect, transect_id, output_dir)
+  write_x_grid_file(chosen_transect, transect_id, output_dir)
+  write_y_grid_file(chosen_transect, transect_id, output_dir)
+  write_bedfriction_file(chosen_transect, transect_id, output_dir)
+  write_fw_file(chosen_transect, transect_id, output_dir)
+  write_2m_depth_distance(chosen_transect, output_dir)
+  
+  create_params_file(transect_id, chosen_transect, output_dir)
+  create_jonswap_file(output_dir)
+  create_tide_file(output_dir)
+  plot_distance_vs_depth(chosen_transect, output_dir)
+  }
+  
+  library(ggplot2)
+
+
+```
+
+# Export Single Transect
+
+Use this code section to export a single transect of your choosing.
+
+```{r Single Transect Export, eval=FALSE, include=TRUE}
+
+# Usage example
+
+library(sf)
+library(raster)
+library(here)
+library(dplyr)
+
+
+
+sampled<- st_read(here("2_output", "modified_shapefiles", "xbeach", "xbeach_transects.gpkg"))
+sampled<- st_drop_geometry(sampled)
+transect_id <- 283 # Example transect ID
+output_directory <- here("7_XBEACH", "Multi_Transect", "reef", paste0("Transect_", transect_id))# Check if the output directory exists, and create it if not
+if (!dir.exists(output_directory)) {
+  dir.create(output_directory, recursive = TRUE)
+}
+
+process_and_write_transect_files(sampled, transect_id, output_directory)
+
+
+
+```
+
+# Export Multiple Transects
+
+Use this code section to export multiple transects. Here I chose to export the reef transects
+```{r Multi Transect Export: Reef}
+library(sf)
+library(raster)
+library(here)
+library(dplyr)
+
+# Read the sampled data
+sampled <- st_read(here("2_output", "modified_shapefiles", "xbeach", "xbeach_transects.gpkg"))
+sampled <- st_drop_geometry(sampled)
+
+# Define a vector of transect IDs
+transect_ids <- c(283, 1563, 1877, 1901, 3190, 4936, 4949) # Replace with actual transect IDs
+
+# Iterate over each transect ID
+for (transect_id in transect_ids) {
+  # Define the output directory for each transect
+  output_directory <- here("7_XBEACH", "Multi_Transect", "reef", paste0("Transect_", transect_id))
+
+  # Check if the output directory exists, and create it if not
+  if (!dir.exists(output_directory)) {
+    dir.create(output_directory, recursive = TRUE)
+  }
+
+  # Process and write files for the transect
+  process_and_write_transect_files(sampled, transect_id, output_directory)
+}
+
+
+```
+
+
+Here I export the non-reef transects
+
+```{r Multi Transect Export: Non-Reef}
+library(sf)
+library(raster)
+library(here)
+library(dplyr)
+
+# Read the sampled data
+sampled <- st_read(here("2_output", "modified_shapefiles", "xbeach", "xbeach_transects.gpkg"))
+sampled <- st_drop_geometry(sampled)
+
+# Define a vector of transect IDs
+transect_ids <- c(2131, 2181, 3172, 3659, 4931, 4960, 4970) # Replace with actual transect IDs
+
+# Iterate over each transect ID
+for (transect_id in transect_ids) {
+  # Define the output directory for each transect
+  output_directory <- here("7_XBEACH", "Multi_Transect", "non-reef", paste0("Transect_", transect_id))
+
+  # Check if the output directory exists, and create it if not
+  if (!dir.exists(output_directory)) {
+    dir.create(output_directory, recursive = TRUE)
+  }
+
+  # Process and write files for the transect
+  process_and_write_transect_files(sampled, transect_id, output_directory)
+}
+
+
+```
+
+# XBeach Simulations
+
+Because Xbeach is not available for SOC Macs, I ran the models on a windows computer. A Powershell script was written to simulate 4 sea levels and 12 wave heights. I am pasting the code below. The code does the following:
+(1) Copies the xbeach program from a source location into each of the model run folders
+(2) Copies the first SeaLevel height and changes the wave height from 1-12 m in the jonswap file (i.e., creates 12 folders one for each wave height)
+(3) Runs the simulations for each of the wave heights at the same time (in parallel)
+(4) Repeats the above for the other sea levels but importantly changes the params.txt file to re-use the wave simulations from the first scenario. This ensures that the waves are identical between the sea levels and that only the sea level is changing.
+
+
+## Powershell Code For Parallel Processing XBeach runs
+
+This code is adapted to a function requiring a few inputs in powershell to execute for multiple transects.
+```{bash Powershell Code, eval=FALSE, engine='bash', include=TRUE}
+function Run-XBeachSimulations {
+    param(
+        [string]$baseDirectory,
+        [string]$programPath,
+        [string]$setupPath,
+        [double[]]$seaLevelRises,
+        [int[]]$waveHeights,
+        [int]$maxJobs
+    )
+
+    # Process the first scenario separately
+    $firstScenarioSeaLevel = "{0:N2}" -f $seaLevelRises[0] + "m"
+    $firstScenarioJobs = @()
+
+    foreach ($waveHeight in $waveHeights) {
+        $waveHeightFormatted = "{0:N1}" -f $waveHeight + "m"
+        $simulationDir = Join-Path $baseDirectory "Sea_Level_Rise_$firstScenarioSeaLevel\Wave_Height_$waveHeightFormatted"
+        $outputDir = Join-Path $simulationDir "Output"
+        $bathyFile = Join-Path $simulationDir "depth.dep"
+        $jonswapFile = Join-Path $simulationDir "jonswap.txt"
+
+        # Create directories and copy files
+        New-Item -ItemType Directory -Force -Path $simulationDir
+        New-Item -ItemType Directory -Force -Path $outputDir
+        Copy-Item -Path "$programPath\*" -Destination $simulationDir -Recurse -Force
+        Copy-Item -Path "$setupPath\*" -Destination $simulationDir -Recurse -Force
+
+        # Adjust the bathymetry file for sea level rise/fall
+        $bathyContent = Get-Content -Path (Join-Path $setupPath "depth.dep") -Raw
+        $newBathyContent = $bathyContent -split "`r?`n" | ForEach-Object {
+            $depthValues = -split $_
+            ($depthValues | ForEach-Object { "{0:N3}" -f ([float]$_ - $seaLevelRises[0]) }) -join "`t"
+        }
+        $newBathyContent | Set-Content -Path $bathyFile
+
+        # Adjust the jonswap.txt file for each wave height
+        $jonswapContent = Get-Content -Path $jonswapFile
+        $newJonswapContent = $jonswapContent -replace '(^Hm0\s*=).*', "`$1 $waveHeight"
+        $newJonswapContent | Set-Content -Path $jonswapFile
+
+        # Start the simulation as a background job
+        $job = Start-Job -ScriptBlock {
+            param($simulationDir, $outputDir)
+            Start-Process -FilePath "$simulationDir\xbeach.exe" -WorkingDirectory $simulationDir -Wait
+        } -ArgumentList $simulationDir, $outputDir
+        $firstScenarioJobs += $job
+    }
+
+    # Wait for all jobs in the first scenario to complete
+    $firstScenarioJobs | Wait-Job
+
+    # Jobs array for subsequent scenarios
+    $jobs = @()
+
+    # Process subsequent scenarios
+    foreach ($seaLevelRise in $seaLevelRises) {
+        if ($seaLevelRise -ne $seaLevelRises[0]) {
+            $seaLevelRiseFormatted = "{0:N2}" -f $seaLevelRise + "m"
+            foreach ($waveHeight in $waveHeights) {
+                $waveHeightFormatted = "{0:N1}" -f $waveHeight + "m"
+                $simulationDir = Join-Path $baseDirectory "Sea_Level_Rise_$seaLevelRiseFormatted\Wave_Height_$waveHeightFormatted"
+                $outputDir = Join-Path $simulationDir "Output"
+                $bathyFile = Join-Path $simulationDir "depth.dep"
+                $paramsFile = Join-Path $simulationDir "params.txt"
+
+                # Copy entire folder from the first scenario
+                $sourceDir = Join-Path $baseDirectory "Sea_Level_Rise_$firstScenarioSeaLevel\Wave_Height_$waveHeightFormatted"
+                Copy-Item -Path "$sourceDir\*" -Destination $simulationDir -Recurse -Force
+
+                # Read the bathymetry file from the setup path
+                $bathyContent = Get-Content -Path (Join-Path $setupPath "depth.dep") -Raw
+
+                # Adjust the bathymetry file for sea level rise/fall for subsequent scenarios
+                $newBathyContent = $bathyContent -split "`r?`n" | ForEach-Object {
+                    $depthValues = -split $_
+                    ($depthValues | ForEach-Object { "{0:N3}" -f ([float]$_ - $seaLevelRise) }) -join "`t"
+                }
+                $newBathyContent | Set-Content -Path $bathyFile
+
+                # Set wbctype to reuse in params.txt for subsequent scenarios
+                $paramsContent = Get-Content -Path $paramsFile
+                $newParamsContent = $paramsContent -replace '(^wbctype\s*=).*', "`$1 reuse"
+                $newParamsContent | Set-Content -Path $paramsFile
+
+                # Start the simulation as a background job
+                $job = Start-Job -ScriptBlock {
+                    param($simulationDir, $outputDir)
+                    Start-Process -FilePath "$simulationDir\xbeach.exe" -WorkingDirectory $simulationDir -Wait
+                } -ArgumentList $simulationDir, $outputDir
+                $jobs += $job
+
+                # Manage jobs to keep under $maxJobs
+                if ($jobs.Count -ge $maxJobs) {
+                    $jobs | Wait-Job -Any
+                    $jobs = $jobs | Where-Object { $_.State -ne 'Completed' }
+                }
+            }
+        }
+    }
+}
+
+
+
+```
+
+The below code executes the function above for every transect in a folder. The parentFolder contains the transects. The output path is where the xbeach outputs are stored. It uses the same naming format as the input. Simply specify the parentFolder to the directory containing your transects.
+
+```{bash Powershell Calling Function for Reef, eval=FALSE, engine='bash', include=TRUE}
+# Define the parent folder containing subfolders
+
+$parentFolder = "F:\7_XBEACH\X_Beach_Simulations\Multi_Transect\reef"
+
+# Get a list of subfolders in the parent folder
+$subfolders = Get-ChildItem -Path $parentFolder -Directory
+
+# Loop through each subfolder and execute the command
+foreach ($subfolder in $subfolders) {
+    $currentSubfolder = $subfolder.FullName
+    $outputFolder = Join-Path (Join-Path (Join-Path $currentSubfolder "..\..\..\Multi_Transect-Output") "reef") $subfolder.Name
+    $baseDirectory = $outputFolder
+    $programPath = "C:\Users\Stephan\Documents\7_XBEACH\X_Beach_Simulations\xbeach_program"
+    $setupPath = $currentSubfolder  # Set the setupPath to match the current subfolder
+    $seaLevelRises = @(-0.25, 0, 0.25, 0.5)
+    $waveHeights = (1..12)
+    $maxJobs = 24
+    
+    # Create the "reef" folder if it doesn't exist
+    if (-not (Test-Path -Path $outputFolder -PathType Container)) {
+        New-Item -ItemType Directory -Path $outputFolder -Force
+    }
+    
+    # Execute the XBeach simulation for the current subfolder
+    Run-XBeachSimulations -baseDirectory $baseDirectory -programPath $programPath -setupPath $setupPath -seaLevelRises $seaLevelRises -waveHeights $waveHeights -maxJobs $maxJobs
+}
+
+
+
+```
+
+```{bash Powershell Calling Function for Non Reef, eval=FALSE, engine='bash', include=TRUE}
+# Define the parent folder containing subfolders
+
+$parentFolder = "F:\7_XBEACH\X_Beach_Simulations\Multi_Transect\non-reef"
+
+# Get a list of subfolders in the parent folder
+$subfolders = Get-ChildItem -Path $parentFolder -Directory
+
+# Loop through each subfolder and execute the command
+foreach ($subfolder in $subfolders) {
+    $currentSubfolder = $subfolder.FullName
+    $outputFolder = Join-Path (Join-Path (Join-Path $currentSubfolder "..\..\..\Multi_Transect-Output") "non-reef") $subfolder.Name
+    $baseDirectory = $outputFolder
+    $programPath = "C:\Users\Stephan\Documents\7_XBEACH\X_Beach_Simulations\xbeach_program"
+    $setupPath = $currentSubfolder  # Set the setupPath to match the current subfolder
+    $seaLevelRises = @(-0.25, 0, 0.25, 0.5)
+    $waveHeights = (1..12)
+    $maxJobs = 24
+    
+    # Create the "reef" folder if it doesn't exist
+    if (-not (Test-Path -Path $outputFolder -PathType Container)) {
+        New-Item -ItemType Directory -Path $outputFolder -Force
+    }
+    
+    # Execute the XBeach simulation for the current subfolder
+    Run-XBeachSimulations -baseDirectory $baseDirectory -programPath $programPath -setupPath $setupPath -seaLevelRises $seaLevelRises -waveHeights $waveHeights -maxJobs $maxJobs
+}
+
+
+```
+
+# Cleanup
+Xbeach makes a lot of files that are not needed for our analysis. We can delete these outputs using the code below.
+
+```{bash xbeach file cleanup, eval=FALSE, engine='bash', include=TRUE}
+# Define the parent folder containing your output folders
+$parentFolder = "F:\7_XBEACH\X_Beach_Simulations\Multi_Transect-Output"
+
+# Get all xbeach.exe files recursively within the output folders
+$exeFiles = Get-ChildItem -Path $parentFolder -File -Recurse -Filter 'xbeach.exe'
+
+# Loop through each xbeach.exe file and delete it
+foreach ($exeFile in $exeFiles) {
+    Remove-Item -Path $exeFile.FullName -Force
+}
+
+
+# Define the parent folder containing your output folders
+$parentFolder = "F:\7_XBEACH\X_Beach_Simulations\Multi_Transect-Output"
+
+# Get all .dll files recursively within the output folders
+$dllFiles = Get-ChildItem -Path $parentFolder -File -Recurse -Filter '*.dll'
+
+# Loop through each .dll file and delete it
+foreach ($dllFile in $dllFiles) {
+    Remove-Item -Path $dllFile.FullName -Force
+}
+
+# Define the parent folder containing your output folders
+$parentFolder = "F:\7_XBEACH\X_Beach_Simulations\Multi_Transect-Output"
+
+# Get all .bcf files recursively within the output folders
+$bcfFiles = Get-ChildItem -Path $parentFolder -File -Recurse -Filter '*.bcf'
+
+# Loop through each .bcf file and delete it
+foreach ($bcfFile in $bcfFiles) {
+    Remove-Item -Path $bcfFile.FullName -Force
+}
+
+```
+#Note 
+The code here was collaboratively written and improved with the help of ChatGPT 4.0.

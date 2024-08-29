@@ -1,0 +1,197 @@
+---
+title: "Manipulating Reef Data"
+author: "Stephan Bitterwolf"
+date: "5/3/2023"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+# About this code
+
+This code processes the model outputs from Storlazzi et al. (2019). It unzips the original files, calculates new values for each island, flags bad values, and joins them into a single shapefile saved into the outputs folder.
+
+# Unzip files
+
+Here I unzip the files.
+```{r unzip files}
+library(tidyverse)
+library(here)
+
+#List zip file paths using here
+zip_files_paths <-list.files(here("0_data","reefs"), 
+                       pattern='.zip',
+                       full.names = TRUE)
+#unzip all files and put into their own directories
+for(zip_file in zip_files_paths){
+  unzip(zipfile = zip_file,
+        exdir = str_remove(zip_file, pattern = ".zip") )
+}
+
+```
+
+# Load DBF files and add new columns
+
+Here I load the DBF files and create new columns that calculate wave energy attenuation and change between present day reef and degraded reef scenarios. The former has no modified depth data while the later deepens reefs by 1 m.
+```{r loading data}
+library(foreign) #required to load .dbf files
+
+
+##Load and manipulate data
+islands = c("Oahu","Maui", "Kauai")
+for (island in islands) {
+  path<- paste(here("0_data","reefs"),"/", island, "/WE_reduction_RP10.dbf",sep="")
+  #print(path)
+  data<- read.dbf(path)
+  data$WE_atten1 <- ((data$WEout1 - data$WEin1)/data$WEin1)*-100
+  data$WE_atten2 <- ((data$WEout2 - data$WEin2)/data$WEin2)*-100
+  data$WE_atnChg <- ((data$WE_atten2 - data$WE_atten1)/data$WE_atten1) *-100
+  data$flag <- ifelse(data$WE_atten1>0,"Good","Bad") #Create a new "flag" column. Then give that column values based on data from   WE_atten1. If WE_atten1 is positive give it the value of "Good" else give it the value of "Bad".
+  data$flag <- ifelse(data$WE_atten2<=0, "Bad", data$flag) #Overwrite "flag" column giving it values based on data from WE_atten2. If WE_atten2 is less than or equal to 0 give it the value of "Bad" else leave its value unchanged (or give it the value of the original flag).
+  data$flag <- ifelse(data$WE_atnChg<0, "Bad", data$flag) #Create a new "flag" column. Then give that column values based on data from   WE_atnChg. If WE_atnChg is less than 0 give it the value of "Bad" else give it the value of "Good".
+  data$flag <- ifelse(data$WE_atnChg>100, "Bad", data$flag)#Overwrite "flag" column giving it values based on data from WE_atnChg. If WE_atnChg is more than 100 is less than or equal to 0 give it the value of "Bad" else leave its value unchanged (or give it the value of the original flag).
+  
+  #####
+  #CREATE COLUMN THAT CALCULATES THE PERCENT INCREASE IN WAVE ENERGY ONSHORE  
+  data$WE_onshr1 <- 100-data$WE_atten1
+  data$WE_onshr2 <- 100-data$WE_atten2
+  data$WE_onsChg <- ((data$WE_onshr2 - data$WE_onshr1)/data$WE_onshr1) *100
+  ##MakePLots##
+  
+data_subset <-filter(data,flag=="Good" & WE_atten1 > 0 & WE_atten2 >0) 
+
+cat("These plots for ", island, " omit ",nrow(data)-nrow(data_subset)," flagged out of ", nrow(data)," total values (", format((nrow(data)-nrow(data_subset))/nrow(data)*100, digits=4),"%).\n", sep="")
+warning<-paste("This plot for ", island, " omits ",nrow(data)-nrow(data_subset)," flagged out of ", nrow(data)," total values (", format((nrow(data)-nrow(data_subset))/nrow(data)*100, digits=4),"%).", sep="")
+
+
+scenario<- "Baseline"
+p4<-ggplot(data_subset, aes(x=WE_atten1)) +
+  geom_histogram(binwidth=5, color="black", fill="blue")+    
+  labs(title=paste(island,": Percent Wave Energy Attenuation for the ", scenario, " Scenario", sep=""),
+       x=paste("Percent Wave Energy Attenuation"),
+       y="Count",
+       caption = warning) +
+  scale_x_continuous(limits = c(0, 100))+
+  theme_classic()
+
+scenario<- "Reef Loss (-1 m)"
+p5<-ggplot(data_subset, aes(x=WE_atten2)) +
+  geom_histogram(binwidth=5, color="black", fill="red")+
+  labs(title=paste(island,": Percent Wave Energy Attenuation for the ", scenario, " Scenario", sep=""),
+       x=paste("Percent Wave Energy Attenuation"),
+       y="Count",
+       caption = warning) +
+  scale_x_continuous(limits = c(0, 100))+
+  theme_classic()
+
+scenario= "Between Scenarios"
+p6 <-ggplot(data_subset, aes(x=WE_atnChg)) +
+  geom_histogram(binwidth=5, color="black", fill="Green")+
+  labs(title=paste(island,": Percent Loss in Wave Energy Attenuation ", scenario, sep=""),
+       x=paste("Loss in Percent Wave Energy Attenuation"),
+       y="Count",
+       caption = warning) +
+  scale_x_continuous(limits = c(0, 100))+
+  theme_classic()
+scenario= "Baseline"
+p7<-ggplot(data_subset, aes(x=WE_onshr1)) +
+  geom_histogram(binwidth=5, color="black", fill="blue")+    
+  labs(title=paste(island,": Percent of Total Wave Energy Reaching Shore for the ", scenario, " Scenario", sep=""),
+       x=paste("Percent Wave Energy Onshore"),
+       y="Count",
+       caption = warning) +
+  theme_classic()
+
+scenario= "Reef Loss (-1 m)"
+p8<-ggplot(data_subset, aes(x=WE_onshr2)) +
+  geom_histogram(binwidth=5, color="black", fill="red")+
+  labs(title=paste(island,": Percent of Total Wave Energy Reaching Shore for the ", scenario, " Scenario", sep=""),
+       x=paste("Percent Wave Energy Onshore"),
+       y="Count",
+       caption = warning) +
+  theme_classic()
+
+scenario= "Between Scenarios"
+p9 <-ggplot(data_subset, aes(x=WE_onsChg)) +
+  geom_histogram(binwidth=20, color="Black", fill="Black")+
+  labs(title=paste(island,": Percent Increase in Onshore Wave Energy ", scenario, sep=""),
+       x=paste("Percent Increase in Onshore Wave Energy"),
+       y="Count",
+       caption = warning) +
+  theme_classic()
+
+##Testing correlation between percent wave energy attenuation loss and onshore energy increase between the two scenarios
+#correlation test
+correlation <- lm(WE_onsChg ~ 0 + WE_atnChg, data= data_subset)
+summary(correlation)
+p10 <-ggplot(data_subset, aes(y=WE_onsChg, x=WE_atnChg)) +
+  geom_point(color="black")+
+  geom_abline(intercept=0, slope=correlation$coefficients[1], color="blue", size=1.1) + 
+  scale_x_continuous(limits = c(0, 100))+
+  theme_classic()
+
+print(p4)
+print(p5)
+print(p6)
+print(p7)
+print(p8)
+print(p9)
+print(p10)
+  assign(island,data)
+write.dbf(data,path)
+}
+## Remove no longer needed objects
+rm(data)
+rm(island)
+rm(p4)
+rm(p5)
+rm(p6)
+rm(p7)
+rm(p8)
+rm(p9)
+rm(p10)
+rm(correlation)
+rm(data_subset)
+```
+
+# Load Shapefiles files and add new columns: Island and Uniq_ID (i.e.,"ID-Island")
+
+```{r merge shapefiles}
+#https://stackoverflow.com/questions/53507133/combining-multiple-shapefiles-in-r
+library(sf)
+library(tibble)
+for (island in islands) {
+  path<- paste(here("0_data","reefs"),"/", island, "/WE_reduction_RP10.dbf",sep="")
+  print(path)
+  data <- st_read(path)
+  data <- st_set_crs(data, 32604)
+  data$island <- island
+  assign(paste(island,"_shape", sep=""),data)
+  plot(st_geometry(data))
+}
+
+Hawaii_shape<- rbind(Maui_shape, Oahu_shape, Kauai_shape)
+Hawaii_shape<-rowid_to_column(Hawaii_shape,var = "reef_ID")
+dir.create(paste(here("2_output"),"/modified_shapefiles",sep=""))
+dir.create(paste(here("2_output","modified_shapefiles"),"/reefs",sep=""))           
+st_write(Hawaii_shape, paste(here("2_output","modified_shapefiles","reefs"),"/reefs_merged.gpkg", sep=""),delete_layer = TRUE)
+
+
+ggplot(filter(Hawaii_shape, flag == "Good"))+
+   geom_sf(aes(color = WE_atten1))+
+   scale_color_viridis_c()
+```
+

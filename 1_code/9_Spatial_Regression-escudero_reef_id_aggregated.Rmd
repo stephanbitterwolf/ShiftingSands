@@ -1,0 +1,1625 @@
+---
+title: "09_Reef_Flat_Models"
+author: "Stephan Bitterwolf"
+date: "2023-07-27"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 100px;
+}
+
+.btn {
+    border-width: 0px 0px 0px;
+    font-weight: normal;
+    text-transform: ;
+}
+.btn-default {
+    color: #2ecc71;
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+
+
+.header-section-number::after {
+  content: ".";
+}
+```
+# Overview
+
+The purpose of this code is to compare the Ordinary Least Squares Regression for the Hawaiian Island Erosion and Reef dataset with and without autocorrelation correction.
+
+```{r Libraries, message=FALSE, warning=FALSE}
+# library(tidyverse)
+# library(spatial)
+
+#library a bunch of packages we may (or may not) use - install them first if not installed already. 
+library(tidyverse)
+library(sf)
+library(tmap)
+library(here)
+
+```
+# Importing and Merging Data
+```{r Import Data}
+Reefs_and_Erosion_w_Geometry<-st_read(here("2_output","modified_shapefiles","joined_databases","Reefs_and_Erosion_w_Geometry.gpkg"))
+
+
+```
+# Modifying imported data
+1. Calculate new values based on changes between scenarios
+2. Filter out nonsensical results
+```{r Modifying Data, message=FALSE, warning=FALSE}
+###Transform data such that a log or Sqrt transformation can be applied to the dependent variable
+library(tidyverse)
+
+Reefs_and_Erosion_w_Geometry$Island<- as_factor(Reefs_and_Erosion_w_Geometry$Island)
+#Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>%
+  #mutate(Island = fct_relevel(island, levels = "Kauai", "Oahu", "Maui")) #Relevel so that Maui comes first (Moving from East to West)
+# df_transformed <- df_sbst
+# df_transformed$SRate_log <- log(df_transformed$SRate_m + abs(min(df_transformed$SRate_m))+1)
+# df_transformed <- df_transformed %>% dplyr::select(-SRate_m) %>% relocate(SRate_log, .before = WEin1)
+
+#Create dataframe for Erosion and Reef Data
+Reefs_and_Erosion_w_Geometry <- dplyr::rename(Reefs_and_Erosion_w_Geometry, WE_onspChg = WE_onsChg) #rename the WE_onsChg to percent change
+
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% drop_na(., Erosion_ID) #Drop any transects not containing erosion points (should be 0)
+
+#Are there any duplicated values
+table(duplicated(Reefs_and_Erosion_w_Geometry$Erosion_ID))
+
+#Remove duplicated erosion values
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% distinct(., Erosion_ID, .keep_all = TRUE)
+
+#Add Reef Width and Depth Summary Columns
+Reefs_and_Erosion_w_Geometry<-Reefs_and_Erosion_w_Geometry%>%
+  group_by(Transects_ID)%>%
+  mutate(Reef_Width = rowSums(pick(Zone_Width_Fore_Reef:Zone_Width_Reef_Flat), na.rm = T),
+         Min_Reef_Depth = min(pick(Min_Depth_Fore_Reef:Min_Depth_Reef_Crest), na.rm = T ))%>%
+  ungroup()
+
+#Add columns to characterize change between reef scenarios
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% mutate(
+                    Ru_Chng = Ru2-Ru1,
+                    Ru_pChng = (Ru2-Ru1)/Ru1*100,
+                    ZS_Chng = ZS2-ZS1,
+                    ZS_pChng = (ZS2-ZS1)/ZS1*100,
+                    TWL_Chng = TWL2-TWL1,
+                    TWL_pChng = (TWL2-TWL1)/TWL1*100,
+                    Lf_Chng = Lf2-Lf1,
+                    Lf_pChng = (Lf2-Lf1)/Lf1*100,
+                    WEin_Chng = WEin2-WEin1,
+                    WEin_pChng = (WEin2-WEin1)/WEin1*100,
+                    WEout_Chng = WEout2-WEout1,
+                    WEout_pChng = (WEout2-WEout1)/WEout1*100
+                    )
+#Relocate columns
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(Ru_Chng, .after = Ru2)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(Ru_pChng, .after = Ru_Chng)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(ZS_Chng, .after = ZS2)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(ZS_pChng, .after = ZS_Chng)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(TWL_Chng, .after = TWL2)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(TWL_pChng, .after = TWL_Chng)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(Lf_Chng, .after = Lf2)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(Lf_pChng, .after = Lf_Chng)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(WEin_Chng, .after = WEin2)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(WEin_pChng, .after = WEin_Chng)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(WEout_Chng, .after = WEout2)
+Reefs_and_Erosion_w_Geometry <- Reefs_and_Erosion_w_Geometry %>% relocate(WEout_pChng, .after = WEout_Chng)
+
+
+
+df <- Reefs_and_Erosion_w_Geometry
+
+# bad_transects<-df%>%
+#   select(Transects_ID, reef_ID, flag, everything()) %>%
+#   filter(flag=="Bad")
+
+
+df_sbst <- df %>% 
+   dplyr::filter(flag == "Good")
+  # %>% #exclude values where reefs are better at reducing wave energy AFTER 1 m reef height was lost
+  # dplyr::filter(Lr2c1 > -2) #%>% #exclude values where the reef is "onshore" a distance greater than 2 m
+  # dplyr::select(SRate_m, Ru1,  Ru_pChng, ZS1,  ZS_pChng, TWL1,  TWL_pChng, Lf1, Lf_pChng, WEin1, WEout1, WEout_pChng, hrf0, hrfmin, Lr2c1, hr2c1, Lreef1, WEred, TWLred, Zsred, WE_onshr1, WE_onspChg, Island)
+
+#Add Unique Island and AreaName Column
+df_sbst$Islxnam <- paste(df_sbst$Island," @ ", df_sbst$AreaName, sep="")
+
+#Move String Columns to End of Dataframe
+df_sbst <- df_sbst %>% relocate(c(Island, AreaName, Islxnam), .after = last_col())
+
+#Calculate fold change
+df_sbst<-df_sbst%>%
+mutate(logit_WE_onshr1 = car::logit(WE_onshr1), 
+         fold_WE_onsh_Chg = (WE_onspChg/100), 
+         fold_Ru_Chng = (Ru_pChng/100),
+         fold_ZS_Chng = (ZS_pChng/100),
+         fold_TWL_Chng = (TWL_pChng/100),
+         fold_Lf_Chng = (Lf_pChng/100),
+         #fold_WEin_Chng = (WEin_pChng/100),
+         fold_WEout_Chng = (WEout_pChng/100),
+         .keep = "unused")
+
+#Move new columns
+df_sbst <- df_sbst %>% relocate(fold_Ru_Chng, .after = Ru1)
+df_sbst <- df_sbst %>% relocate(fold_ZS_Chng, .after = ZS1)
+df_sbst <- df_sbst %>% relocate(fold_TWL_Chng, .after = TWL1)
+df_sbst <- df_sbst %>% relocate(fold_Lf_Chng, .after = Lf1)
+#df_transformed <- df_transformed %>% relocate(fold_WEin_Chng, .after = WEin_Chng)
+
+###Remove Variables Highly Correlated with One Another
+data <- df_sbst %>% dplyr::select(-c(Zsred, WEred, TWLred, hrf0))
+glimpse(data)
+
+#remove unnecessary variables
+data<- data%>%
+  dplyr::select(-c(ID, OBJECTID,FID_,X, ero_ID, trns_ID, Erosion_ID))
+
+# Convert line geometries to points
+
+## Extract the first point from each line geometry
+data_geom <- st_cast(st_line_sample(data, sample=0), "POINT")
+
+## Create a new sf object combining the points with the original data
+data <- st_sf(st_drop_geometry(data), geometry = data_geom)
+
+
+
+write_csv(data, here("2_output", "dataframes","reefs_and_erosion_w_geometry.csv"))
+st_write(data, here("2_output", "modified_shapefiles", "joined_databases","reefs_and_erosion_w_geometry_modified.gpkg"), delete_layer = TRUE)
+```
+
+## Aggregate entire dataset
+
+Here I aggregate all erosion values for each reef transect into a weighted mean.
+```{r Aggregation}
+Reefs_and_erosion<-data %>% ungroup()
+### Use Tukey's fences to remove outliers but keep sites where there is only 1 erosion value
+Reefs_and_erosion <- Reefs_and_erosion %>%
+  group_by(reef_ID) %>%
+  mutate(
+    Q1 = quantile(SRate_m, 0.25),
+    Q3 = quantile(SRate_m, 0.75),
+    IQR = Q3 - Q1,
+    Lower_Fence = Q1 - 3 * IQR,
+    Upper_Fence = Q3 + 3 * IQR,
+    n_erosion=n()
+  ) %>%
+  mutate(outlier=if_else(n_erosion==1,FALSE,(SRate_m <= Lower_Fence | SRate_m >= Upper_Fence)))%>% #Keep sites where there is only one erosion value
+  mutate(n_outlier=sum(outlier))%>%
+  ungroup()
+max(Reefs_and_erosion$n_outlier)
+
+write_csv(Reefs_and_erosion, here("2_output", "dataframes","reefs_and_erosion_w_geometry-outliers.csv"))
+
+#save outlier summary data to join to summarized dataset later
+outlier_summary<-st_drop_geometry(Reefs_and_erosion)%>%
+  group_by(reef_ID)%>%
+  dplyr::select(c("reef_ID","Q1":"n_erosion", "n_outlier"))%>%
+  distinct()
+
+## Aggregated Dataset using the median and the weighted mean **Note these aggregations will only affect the SRate_m value
+weighted_mean <- 
+  Reefs_and_erosion%>%
+  filter(outlier!=TRUE)%>% #Select only non-outliers
+  group_by(reef_ID) %>%
+  mutate(transformed_uncertainty= 1/Suncert_m) %>%
+  summarise(SRate_wgt_mean=weighted.mean(SRate_m,transformed_uncertainty))
+# st_write(weighted_mean, here("2_output", "modified_shapefiles", "joined_databases", "test_mean_ersoion.gpkg"), delete_layer = TRUE)
+
+median_Srate<-Reefs_and_erosion%>%
+  filter(outlier!=TRUE)%>% #Select only non-outliers
+  group_by(reef_ID) %>%
+  mutate(transformed_uncertainty= 1/Suncert_m)%>%
+  summarise(SRate_median=median(SRate_m))
+
+#This section is meant to summarize the reef data by reef transect ID. It removes all non-reef transect data and then selects only those rows with unique values for the reef data. This is used in the median and mean summary calculations. Importantly, without this step the final values would be different as each reef can have multiple erosion points mapping to it. Without filtering distinct rows the values would be slightly different. Not filtering out copy rows could be a good thing if you want to have the number of erosion points mapping to each transect carry some weight. I decided not to do that.
+reef_summary<-Reefs_and_erosion%>%
+ group_by(reef_ID) %>%
+  dplyr::select(-c("flag", "Transect", "SRate_m", "Suncert_m", "Sstd_m", "Num", "DegF","Shape__Len", "Q1":"n_erosion", "n_outlier"))%>%
+  distinct() %>%
+  ungroup()
+
+#Remove duplicated reed_IDs: sometimes there are erosion points in one transect that map to two sites. These inflate the dataset and are removed here.
+reef_summary$duplicated<- reef_summary %>%
+  select(reef_ID)%>%
+  duplicated()
+
+reef_summary<- reef_summary %>%
+  filter(duplicated==FALSE)
+
+data_reef_aggregated<-left_join(reef_summary,st_drop_geometry(weighted_mean), by="reef_ID" )
+
+data_reef_aggregated<-left_join(data_reef_aggregated,st_drop_geometry(median_Srate), by="reef_ID" )
+
+data_reef_aggregated<-left_join(data_reef_aggregated,st_drop_geometry(outlier_summary), by="reef_ID" )
+
+#Remove all objects other than the aggregated dataset
+
+rm(list = setdiff(ls(), "data_reef_aggregated"))
+
+
+
+data_reef_aggregated<-data_reef_aggregated %>%
+  select(SRate_wgt_mean,SRate_median, everything())
+
+
+class(data_reef_aggregated)
+st_write(data_reef_aggregated, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-sites_no_out.gpkg"), delete_layer = TRUE)
+write_csv(data_reef_aggregated,here("2_output", "dataframes","Reef_data_aggregated-reef_ID_no_out.csv") )
+
+data_reef_aggregated <- data_reef_aggregated %>%
+  filter(Transect_Type == "Reef")
+
+st_write(data_reef_aggregated, here("2_output", "modified_shapefiles", "joined_databases", "Reef_only_aggregated-reef_ID_no_out.gpkg"), delete_layer = TRUE)
+write_csv(data_reef_aggregated,here("2_output", "dataframes","Reef_only_aggregated-reef_ID_no_out.csv") )
+```
+
+```{r Select Summarization Method}
+#Here I will choose to use the weighted mean instead of the median (by removing the median values)
+
+data_reef_aggregated <- data_reef_aggregated %>%
+  dplyr::select(-c(SRate_median, reef_ID))
+
+```
+
+## Add Exclusion Column
+Some sites will be excluded due to abnormalities such as:
+1. Historic Sand Mining
+2. Accretion due to offshore sand deposit
+3. Proximity to river discharge sites
+
+
+```{r Excluding Sites}
+#install.packages("googlesheets4")
+library(googlesheets4)
+
+excluded_sites <- read_sheet("https://docs.google.com/spreadsheets/d/1GZ-rRji9zFF583pu2Var3FP6BVr8UrHwLGAtRvC7mRY/edit?usp=sharing")
+
+data<-left_join(data_reef_aggregated, excluded_sites, by=c("Islxnam"="excluded_sites"))
+
+data<-data %>%
+  mutate(site_exclusion=ifelse(is.na(exclusion_reason), "not excluded", "excluded"))
+```
+
+
+# Reef Flat Regressions
+
+## Select and Aggregate Variables for the Regression
+```{r Select Data, warning=FALSE}
+
+#Create a list of reef transects to use in the regression
+table(data$Reef_Zones)
+data<-data%>%
+  filter(Reef_Zones%in% c(
+    #"Flat and Fore Reef",
+  "Flat and Crest",
+  #"Crest and Fore Reef",
+  #"Flat Only",
+  #"Crest Only",
+  #"Fore Reef Only",
+  "Flat, Crest, and Fore Reef" 
+  ))
+
+write_csv(data, "escudero_data.csv")
+
+#Select Reef Data
+##### Reef Flat #####
+kept_vars_F <- c(#"reef_ID",
+               "SRate_wgt_mean",         #Shoreline Change rate (m/yr)
+               #"Suncert_m", #uncertainty in the change rate (m/yr) used as part of the weighted average
+               
+               #"Island", ##Removed due to conversation with Mike in Jan of 2023
+               #  "Maui",
+               # "Kauai",
+               # "Oahu",
+
+              
+
+               ### NEW REEF geometry ###
+                # "Distance_Offshore_Fore_Reef",
+                # "Distance_Offshore_Reef_Crest",
+                #"Distance_Offshore_Reef_Flat",
+                 #"Reef_Width",
+                # # # "Zone_Width_Fore_Reef",
+                # # "Zone_Width_Reef_Crest",
+                "Zone_Width_Reef_Flat",
+                # # # "Median_Depth_Fore_Reef",
+                # # "Median_Depth_Reef_Crest",
+                "Median_Depth_Reef_Flat",
+                # # # # "Max_Depth_Fore_Reef",
+                # # # "Max_Depth_Reef_Crest",
+                #"Max_Depth_Reef_Flat",
+                # # # # "Min_Depth_Fore_Reef",
+                "Min_Depth_Reef_Crest",
+                 #"Min_Depth_Reef_Flat",
+                #"Min_Reef_Depth",
+                # # # "slope_Fore_Reef",
+                # # "slope_Reef_Crest",
+                 "slope_Reef_Flat",
+  ### MODEL FORCING ###
+               "WEin1"             #Wave energy entering the model @ 30 m depth
+               # ### Model Output or Calculations ###
+               # "TWL1",              #Total water Level At Shore (i.e., model output location) ##Removed in favor of Ru1 due to conversation with Mike in Jan of 2023
+               # "logit_WE_onshr1",   # Proportion of incoming wave energy arriving onshore (logit transformed)
+               # "Ru1",
+               # # 
+               # # ### Reef Degradation Impact ###
+               # # #these variables calculate the relative impact of reef deepening by 1 m on model outputs
+               # "fold_TWL_Chng",       #Fold change in total water level at shoreline between current and degraded reefs bathymetry (-1 m)
+               # "fold_WE_onsh_Chg",     #Fold change in wave energy at shoreline between current and degraded reefs bathymetry (-1 m)
+               # "fold_Lf_Chng"
+  
+ 
+               ) #Here I write which variables to include in the model
+
+
+#Save only important data
+
+## Non Aggregated Dataset
+Reef_data <- data %>%
+  dplyr::select(all_of(kept_vars_F))%>%
+  na.omit(.)
+
+
+
+#remove infinite values
+Reef_data<-Reef_data%>%
+  group_by(geometry)%>%
+  filter(across(everything(), ~ !is.infinite(.)))  
+
+st_write(Reef_data, here("2_output", "modified_shapefiles", "joined_databases", "Reef_data_aggregated-escudero.gpkg"), delete_layer = TRUE)
+write_csv(Reef_data,here("2_output", "dataframes","aggregated_data-escudero.csv") )
+
+
+```
+
+# Stepwise Model Selection With Outliers
+
+```{r StepWise Model Selection, message=FALSE, warning=FALSE}
+library(MASS)
+library(sjPlot)
+library(plotly)
+dataset<-st_drop_geometry(Reef_data)
+dataset <- dataset %>% ungroup()
+dependent_variable<-"SRate_wgt_mean"
+
+full <- glm (as.formula(paste(dependent_variable, "~ .")), family = gaussian, data = dataset)
+
+stepwise_model <- stepAIC(full, trace = FALSE)
+final_model<-lm(as.formula(paste(dependent_variable, "~ .")),data=stepwise_model$model)
+tab_model(final_model, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(stepwise_model, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+# coef_plot$sign <-c("Negative")
+# coef_plot$sign <- coef_plot %>% filter(estimate > 0)
+# coef_plot %>% mutate(test = ifelse(estimate < 0, "Negative", "Positive"))
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_stepwise_model<- coef_plot %>% 
+  dplyr::filter(p.value<=.5) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: Stepwise (+outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_stepwise_model
+
+final_terms<-coef_plot %>%
+  select(term) %>%
+  mutate(term=as.character(term))
+
+dataset %>%
+  ggplot(aes(y=SRate_wgt_mean, x=Median_Depth_Reef_Flat, color=site_exclusion))+
+  geom_point()
+```
+
+
+library(ggpubr)
+library(patchwork)
+
+# Initialize a list to store plots
+plots_list <- list()
+
+for (n in 1:length(final_terms$term)) {
+  term <- final_terms$term[n]
+  
+  plot <- dataset %>%
+    ggplot(aes(x = !!as.name(term), y = SRate_wgt_mean)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    stat_regline_equation(label.x = 0.1, label.y = 0.9, formula = y ~ x, label.tag = "adj.r.squared") +
+    stat_cor(label.x = 0.1, label.y = 0.8, label.sep = ", ")
+  
+  plots_list[[n]] <- plot
+}
+
+# Combine and display plots using patchwork
+print(wrap_plots(plots_list, ncol = length(plots_list)))
+
+dataset %>%
+    ggplot(aes(x = !!as.name(final_terms$term[3]), y = SRate_wgt_mean)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    stat_regline_equation(label.x = 0.1, label.y = 0.9, formula = y ~ x, label.tag = "adj.r.squared") +
+    stat_cor(label.x = 0.1, label.y = 0.8, label.sep = ", ")
+```
+
+## Create models with Non-Transformed Data
+
+### Linear Model
+
+```{r Plot Linear Relationships}
+library(sf)
+dataset<-Reef_data
+dataset <- dataset %>% ungroup()
+dependent_variable<-"SRate_wgt_mean"
+
+plot(st_drop_geometry(dataset))
+
+library(corrplot)
+corplot.data<-st_drop_geometry(dataset) %>%
+  select(where(is.numeric)) %>%
+  ungroup()
+
+xtr = corplot.data %>% dplyr::select(-dependent_variable)
+ytr = corplot.data %>% dplyr::select(dependent_variable)
+
+cor_numVar = cor(cbind(xtr, ytr), use="pairwise.complete.obs") # correlations of all numeric variables
+# sort on decreasing correlations with log1p_SalePrice      
+cor_sorted = as.matrix(sort(cor_numVar[, dependent_variable], decreasing = TRUE))
+  
+# select only high corelations
+CorHigh = names(which(apply(cor_sorted, 1, function(x) abs(x)>0.01)))
+cor_numVar = cor_numVar[CorHigh, CorHigh]
+
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+
+## Plot Correlated Variables
+dataset %>%
+  ggplot(aes(y=SRate_wgt_mean, x=Zone_Width_Reef_Flat))+
+  geom_point()+
+  stat_smooth()
+
+
+```
+
+
+### Variable Selection with LASSO
+
+
+
+```{r LASSO Selection 1}
+model_data <-st_drop_geometry(dataset)
+
+#Here I follow the example from Julia SIlge: https://juliasilge.com/blog/lasso-the-office/
+library(tidymodels)
+erosion_split <- initial_split(model_data, prop=7/8, strata = dependent_variable)
+
+erosion_train <- training(erosion_split)
+erosion_train %>% glimpse()
+
+erosion_test <- testing(erosion_split)
+erosion_test %>% glimpse()
+
+erosion_rec <- recipe(as.formula(paste(dependent_variable, "~ .")), data = erosion_train) %>%
+    step_zv(all_numeric(), -all_outcomes()) %>%
+    step_dummy(all_nominal(), one_hot = TRUE)%>%
+    # step_BoxCox(all_numeric(), -all_outcomes())%>%#We are scaling and standardizing the dummies as well as the numeric datahttps://stats.stackexchange.com/questions/69568/whether-to-rescale-indicator-binary-dummy-predictors-for-lasso
+    step_normalize(all_numeric(), -all_outcomes())
+
+erosion_prep <- erosion_rec
+
+###
+
+lasso_spec <- linear_reg(penalty = 0.1, mixture = 1) %>%
+  set_engine("glmnet")
+
+wf <- workflow() %>%
+  add_recipe(erosion_rec)
+
+#install.packages("glmnet")
+lasso_fit <- wf %>%
+  add_model(lasso_spec) %>%
+  fit(data = erosion_train)
+
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  tidy()
+
+
+###
+
+set.seed(1992)
+erosion_boot <- bootstraps(erosion_train, strata = dependent_variable)
+
+tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+lambda_grid <- grid_regular(penalty(), levels = 100)
+
+
+
+###
+doParallel::registerDoParallel()
+
+#set.seed(2023)
+lasso_grid <- tune_grid(
+  wf %>% add_model(tune_spec),
+  resamples = erosion_boot,
+  grid = lambda_grid
+)
+
+###
+
+lasso_grid %>%
+  collect_metrics()
+
+
+###
+
+lasso_grid %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_errorbar(aes(
+    ymin = mean - std_err,
+    ymax = mean + std_err
+  ),
+  alpha = 0.5
+  ) +
+  geom_line(linewidth = 1.5) +
+  facet_wrap(~.metric, scales = "free", nrow = 2) +
+  scale_x_log10() +
+  theme(legend.position = "none")
+
+###
+
+lowest_rmse <- lasso_grid %>%
+  select_best("rmse")
+
+final_lasso <- finalize_workflow(
+  wf %>% add_model(tune_spec),
+  lowest_rmse
+)
+
+###
+
+library(vip)
+
+final_lasso %>%
+  fit(erosion_train) %>%
+  pull_workflow_fit() %>%
+  vi(lambda = lowest_rmse$penalty) %>%
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance)
+  ) %>%
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL)
+
+
+last_fit(
+  final_lasso,
+  erosion_split
+) %>%
+  collect_metrics()
+
+```
+The lasso model selects for 5 out of the 7 variables. slope_Reef_Flat and Median_Depth_Reef_Flat are omitted.
+
+```{r Lasso Omitted Values}
+
+lasso_rejected_explanatory_variables<- final_lasso %>%
+  fit(erosion_train) %>%
+  pull_workflow_fit() %>%
+  vi(lambda = lowest_rmse$penalty) %>%
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance))%>%
+  filter(Importance==0)
+
+
+lasso_selected_dataset <- dataset[, !colnames(dataset) %in% lasso_rejected_explanatory_variables$Variable]
+
+
+
+```
+
+```{r Build Model No Transformation}
+dataset<-lasso_selected_dataset
+
+library(tidymodels)
+model_data<-st_drop_geometry(dataset) %>%
+   ungroup()
+  
+
+model_recipe <-
+    recipe(as.formula(paste(dependent_variable, "~ .")), data=model_data)%>%
+  step_center(all_numeric_predictors())%>%
+  step_scale(all_numeric_predictors())%>%
+  prep
+
+lm_spec <- linear_reg() %>% set_engine("lm")
+
+
+lm_fit <- fit(lm_spec, as.formula(paste(dependent_variable, "~ .")), data=bake(model_recipe, new_data = NULL))
+
+regression_data<- bake(model_recipe, new_data = NULL)
+
+tidy(lm_fit)
+summary(lm_fit$fit)
+
+
+```
+
+
+#### Plot Model Results
+```{r Plot Model Results}
+#install.packages('scico')
+library(scico)
+
+tidy(lm_fit)%>%
+  ggplot(aes(x=term, y=estimate, fill=p.value, color=p.value))+
+  geom_point()+
+  geom_bar(stat="identity")+
+  scale_fill_scico("p",palette = 'vik')+
+  scale_color_scico("p",palette = 'vik')+
+  coord_flip()+
+  labs(x="",y="estimate")
+
+
+#Plot Residuals
+hist(lm_fit$fit$residuals)
+
+{par(mfrow=c(2,2)) # plot all 4 plots in one
+
+plot(lm_fit$fit, 
+     pch = 16,    # optional parameters to make points blue
+     col = '#006EA1')
+}
+
+
+
+```
+
+
+#### Bootstrap Resampling of Linear Model
+
+```{r BootStrap Simple Regression}
+library(tidymodels)
+
+
+set.seed(1992)
+
+#GET CENTERED AND SCALED DATA for Regression
+data_boot <- model_data%>%
+    recipe(as.formula(paste(dependent_variable, "~ .")))%>%
+    step_center(all_numeric_predictors())%>%
+    step_scale(all_numeric_predictors())%>%
+    prep %>% 
+    bake(NULL)
+###
+  fit_lm_on_bootstrap <- function(split) {
+  linear_reg() %>%
+  set_engine("lm")%>%
+  fit(SRate_m ~., data=bake(model_recipe, new_data = NULL))
+}
+
+
+#Bootstrap Resample the centered and scaled data
+bootstrap_data<- bootstraps(data_boot, times=1000, apparent = TRUE)
+
+erosion_models <- bootstrap_data %>%
+  mutate(
+    model = map(splits, ~ lm(as.formula(paste(dependent_variable, "~ .")), data = .)),
+    coef_info = map(model, tidy))
+  
+
+
+
+erosion_coefs <- erosion_models %>%
+  unnest(coef_info)
+
+#glimpse(erosion_coefs)
+
+
+erosion_coefs <- erosion_coefs %>% filter(term != "(Intercept)")
+#erosion_coefs
+erosion_coefs<-as_tibble(erosion_coefs) %>%
+  select(-c(splits,model))
+
+
+library(rsample)
+conf_int<-int_pctl(erosion_models, coef_info, alpha = 0.05)
+
+conf_int<-conf_int%>% filter(term != "(Intercept)")
+conf_int<-as_tibble(conf_int)
+
+test<-left_join(erosion_coefs,conf_int, by="term")
+test <- test %>%
+  mutate(sig=if_else(p.value>0.05,">0.05","<0.05"))
+
+test %>%
+  ggplot(aes(x=estimate)) +
+  geom_histogram(position="identity", alpha=0.5, bins=15)+
+  labs(title="Bootstrap resample estimates with 95% confidence intervals",
+       x="Coefficient estimates",
+       y="Frequency")+
+    facet_wrap(~term, scales = "free")+
+  #shade_confidence_interval(endpoints = c(test$.lower,test$.upper), fill="gold", alpha=0.1, color=)
+  geom_vline(aes(xintercept=.lower))+
+  geom_vline(aes(xintercept=.upper))+
+  labs(title="Bootstrap resample estimates with 95% confidence intervals",
+       x="Coefficient estimates",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+### Plotting Bootstrap Coefficients
+library(scico)
+test%>%
+  ggplot(aes(x=term, y=estimate))+
+  geom_point(alpha=0.1, position=position_jitter(height=0, width=0.05), aes(color=sig)) +
+  stat_summary(fun=mean, geometry="point", fill="red", pch=21, size=3)+ 
+  stat_summary(fun.data=mean_cl_normal, geometry="errorbar", 
+               width=1, colour="red", alpha=0.7) +
+  scale_color_viridis_d("p value",guide = guide_legend(override.aes = list(size = 3,
+                                                                    alpha = 1) ))+
+  coord_flip()+
+  labs(caption="Fig x. Coefficient estimates from 1000 bootstrap resamples. Red dot = mean. Errorbars = 95% Confidence intervals")
+
+
+```
+
+### Spatial Model
+
+
+```{r Examine Autocorrelation, message=FALSE, warning=FALSE}
+library(sf)
+library(sfdep)
+library(dplyr)
+
+# grab geometry
+geo <- st_geometry(dataset) 
+
+# grab transformed and scaled data
+geo_data<-st_drop_geometry(dataset)%>%
+    recipe(as.formula(paste(dependent_variable, "~ .")))%>%
+    step_center(all_numeric_predictors())%>%
+    step_scale(all_numeric_predictors())%>%
+    prep %>% 
+    bake(NULL)
+#join geometry with data
+
+ geo_data_map<- dataset
+
+#save model residuals to our dataset
+geo_data_map$residuals<-lm_fit$fit$residuals
+
+#save file for external use
+st_write(geo_data_map,"geo_data_map.shp", append=FALSE)
+
+#### Calculating Neighbors ####
+#Calculate neighbors based on a distance band
+critical_threshold(st_geometry(geo_data_map))
+nb_dist <- st_dist_band(st_geometry(geo_data_map),  upper = critical_threshold(st_geometry(geo_data_map))) 
+
+#Calculate neighbors based on kneigherst neighbors
+nb_knear_8<- st_knn(geometry=st_geometry(geo_data_map), k = 8)
+
+
+#### Calculate Moran's I ####
+#*# Decide which neighbors to use
+neighbors <-nb_dist 
+# neighbors <-nb_knear_8 
+#Create weights matrix
+wt <- st_weights(neighbors)
+
+#Compute the Moran I and Test to see if it is different from a random distribution
+moran<-sfdep::global_moran_test(geo_data_map$residuals,neighbors,wt)
+moran
+
+#Re-compute the Moran with a monte carlo simulation
+MC<-spdep::moran.mc(geo_data_map$residuals,spdep::nb2listw(neighbors,style = "C"), nsim=599)
+MC
+plot(MC,main="", las=1)
+
+#Extract Moran Data for Plotting
+moran_data<-spdep::moran.plot(geo_data_map$residuals,spdep::nb2listw(neighbors,style = "C"), return_df = TRUE, plot=FALSE)
+#trace(ggpubr:::.stat_lm, edit = TRUE) #https://stackoverflow.com/questions/66177005/im-using-stat-regline-equation-with-ggscatter-is-there-a-way-to-specify-the-si
+moran_data<-cbind(moran_data, geo_data)
+
+#Plot Moran Data
+moran_data %>%
+  ggplot(aes(x=x, y=wx, color=get(dependent_variable)))+
+  geom_point()+
+  labs(x="Model Residuals", y="Spatially Lagged Residuals", caption=paste("Moran's I: ",round(moran$estimate[1],3)))+
+  geom_smooth(method= 'lm',formula = y~x, se = FALSE)+
+  geom_hline(yintercept = 0, linetype="dashed")+
+  geom_vline(xintercept = 0, linetype="dashed")+
+  scico::scale_color_scico("Shoreline Change Rate (m/yr)",midpoint = 0, palette = "roma")+
+  theme_dark()
+  # ggpubr::stat_regline_equation(mapping = NULL,
+  #                               data = NULL,
+  #                               formula = y ~ x,
+  #                               label.x.npc = "left",
+  #                               label.y.npc = "top",
+  #                               label.x = NULL,
+  #                               label.y = NULL,
+  #                               output.type = "expression",
+  #                               geometry = "text",
+  #                               position = "identity",
+  #                               na.rm = FALSE,
+  #                               show.legend = NA,
+  #                               inherit.aes = TRUE)
+
+```
+
+The Morans I value is 0.42 meaning that there is spatial autocorrelation between the residuals.
+
+#### Addressing Spatial Autocorrelation
+  
+```{r Spatial Regressions, include=FALSE}
+library(spdep)
+library(spatialreg)
+#Neighbors= neighbors
+nb_list <- nb2listw(neighbors)
+#Weights =wt
+wt <- wt
+
+### Define Regression Equation ###
+lm_fit[["fit"]][["terms"]]
+reg.eq= as.formula(paste(dependent_variable, "~ ."))
+
+### Linear Model: OLS ###
+linear_model<-lm(reg.eq, data=data_boot)
+summary(linear_model)
+
+### SLX ###
+SLX_model <- spatialreg::lmSLX(reg.eq, data=data_boot, nb_list) #Does not work for K-nearest neighbors
+summary(SLX_model)
+impacts(SLX_model, nb_list) #Tells you how neighboring values impact the effects
+summary(impacts(SLX_model, nb_list, R=500), zstats=TRUE)#tells you if the effects are significant
+
+### SAR: Spatial Lag Model ###
+SAR_model <- lagsarlm(reg.eq, data=data_boot, nb_list)
+summary(SAR_model)
+impacts(SAR_model,listw=nb_list)
+summary(impacts(SAR_model,listw=nb_list, R=2000), zstats=TRUE)
+
+### SEM: Spatial Error Model ###
+SEM_model <-errorsarlm(reg.eq, data=data_boot, nb_list)
+summary(SEM_model)
+Hausman.test(SEM_model) # The high p value says that we cannot reject that the SEM_model is inappropriate
+
+### SDEM: Spatial  Durbin Error Model
+SDEM_model<-errorsarlm(reg.eq, data=data_boot, nb_list, etype="emixed")
+summary(SDEM_model)
+impacts(SDEM_model,listw=nb_list)
+summary(impacts(SDEM_model,listw=nb_list, R=2000), zstats=TRUE)
+#Compare with maximul likelihood tests and AIC
+AIC(linear_model)
+AIC(SLX_model)
+AIC(SAR_model)
+AIC(SEM_model)
+AIC(SDEM_model)
+
+cbind(c("Linear",
+        "SLX",
+        "SAR",
+        "SEM",
+        "SDEM"),
+      c(AIC(linear_model),
+AIC(SLX_model),
+AIC(SAR_model),
+AIC(SEM_model),
+AIC(SDEM_model)))
+
+###
+
+```
+
+Because I think my model is a local model (nearby values affecting nearby but not the entire dataset). I will focus on the local models. The Spatial Durbin Model will be compared to the SEM and the SLX
+
+```{r comparing local spatial models}
+summary(SDEM_model)
+impacts(SDEM_model,listw=nb_list)
+summary(impacts(SDEM_model,listw=nb_list, R=2000), zstats=TRUE)
+# None of the lagged values are statistically significant
+
+#LR Tests
+LR.Sarlm(SDEM_model,SEM_model)
+LR.Sarlm(SDEM_model,SLX_model)
+LR.Sarlm(SDEM_model,SAR_model)
+LR.Sarlm(SDEM_model,linear_model)
+
+
+#Also check AIC
+AIC(SDEM_model)
+AIC(SEM_model)
+AIC(SLX_model)
+AIC(SAR_model)
+AIC(linear_model)
+
+
+
+
+#The Test Indicates that I should Restrict the model to a spatial error model
+```
+
+The SDEM model has the lowest AIC value. Likelihood ratio comparisons indicate that it is not very different from the SAR or SEM model. I lean in favor of the SEM model since it is easy to interpret.
+
+```{r SEM model tests}
+
+### Heteroskedasticity
+bptest.Sarlm(SEM_model, studentize = TRUE)
+Hausman.test(SEM_model)
+#bptest.Sarlm(SDEM_model, studentize = TRUE)
+#The p value indicates that there is not significant heteroskedasticity @ an alpha of 0.05 and p value of 0.065
+
+### Pseudo R^2: 1-(sum of squared estimate of errors/
+1-(SEM_model$SSE/(var(data_boot$SRate_wgt_mean)*(length(data_boot$SRate_wgt_mean)-1)))
+
+summary(SEM_model)
+```
+The above output indicates non-significant heteroskedasticity (BP = 3.7435, df = 5, p-value = 0.907). The pseudo R squared value is 0.45 which is much better than the linear model.
+
+The SEM model: SEM Spatial Error Model
+𝑦=𝑋𝛽+𝑢, 𝑢=𝜆𝑊𝑢+𝜀
+
+
+
+# Create models with Transformed Data
+
+## Transform Predictors Using BoxCox Method
+
+```{r Transform Predictors}
+### SELECT DATASET ###
+dataset <- Reef_data
+dataset<- dataset %>% ungroup()
+
+### END SELECTION ###
+
+xall <-st_drop_geometry(dataset)%>% 
+  dplyr::select(-dependent_variable)
+xall[1:ncol(xall)] <- lapply(xall[1:ncol(xall)], as.numeric)
+num_names = colnames(xall)[sapply(xall, class) == "numeric"]
+xall_before_boxcox = xall
+
+  lambdas <- list()
+for (v in num_names){
+  # box-cox need all of the values to be positive
+  xall[v] = xall[v] - min(xall[v]) + 1 # plus the minimun and 1 to prepare for the box-cox
+  # search for the best lambda for the box-cox
+  low = -2
+  up = 2
+  for (i in 1:5){
+    bc = MASS::boxcox(xall[v][[1]] ~ 1, lambda=seq(low, up, len=(up-low)*100+1), plotit=FALSE)
+    best_lambda = bc$x[which(bc$y == max(bc$y))]
+    lambdas[[v]] <- best_lambda
+    if (best_lambda == up){
+      low = best_lambda - 0.01
+      up = 2*up
+    }
+    else if(best_lambda == low){
+      up = best_lambda + 0.01
+      low = 2*low
+    }
+    else{break}
+    
+    # if (i > 3){print(v)}
+  }
+  # box-cox transformation
+  xall[v] = (xall[v] ^ best_lambda - 1) / best_lambda 
+}
+
+xall_after_boxcox = xall
+
+library(moments)
+library(gridExtra)
+
+
+den_skew_plots = function(xall){
+  num_names = colnames(xall)[sapply(xall, class) == "numeric"]
+  p_li = list()
+  
+  for (num_var in num_names){
+    data = as.data.frame(xall[, num_var])
+    colnames(data) = 'temp_name'
+    grey_degree = 100 - as.integer(min(60, 10*(abs(skewness(data)))))
+        
+    p = ggplot(data = data, aes(x = `temp_name`)) + 
+      geom_line(stat = 'density', size=1) +
+      xlab(paste(num_var, '\n', 'Skew:', round(skewness(data)[[1]], 4))) + 
+      theme(panel.background = element_rect(fill = paste0('grey', grey_degree)))
+    
+    p_li = c(p_li, list(p))
+  }
+  do.call("grid.arrange", c(p_li, ncol=3))
+}
+
+lambdas
+den_skew_plots(xall_before_boxcox)
+den_skew_plots(xall_after_boxcox)
+
+xall <- xall_after_boxcox ##Save transformed data to xall
+
+dataset<-dataset %>%
+  dplyr::select(dependent_variable)%>%
+  bind_cols(., xall)
+
+st_write(dataset, here("2_output", "modified_shapefiles", "joined_databases", "simple_regression_transformed.gpkg"),delete_layer = TRUE)
+```
+
+```{r Export variations of dataset}
+
+# eroding_only<-dataset %>%
+#   filter(SRate_m<0)
+# hist(eroding_only$SRate_m)
+# hist((eroding_only$SRate_m*-1)^(1/3))  
+# st_write(eroding_only, here("2_output", "modified_shapefiles", "joined_databases", "complex_regression-eroding_only.shp"),delete_layer = TRUE)
+# eroding_only%>%
+#   mutate(tSRate_m=(SRate_m*-1)^(1/3))%>%
+#   select(-SRate_m)%>%
+#   st_write(here("2_output", "modified_shapefiles", "joined_databases", "complex_regression-eroding_only-cuberoot.shp"),delete_layer = TRUE)
+
+```
+
+## Plot Correlation Matrix
+```{r Correlation Matrix, message=FALSE, warning=FALSE}
+
+library(corrplot)
+corplot.data<-st_drop_geometry(dataset) %>%
+  select(where(is.numeric))
+
+xtr = corplot.data %>% dplyr::select(-dependent_variable)
+ytr = corplot.data %>% dplyr::select(dependent_variable)
+
+cor_numVar = cor(cbind(xtr, ytr), use="pairwise.complete.obs") # correlations of all numeric variables
+# sort on decreasing correlations with log1p_SalePrice      
+cor_sorted = as.matrix(sort(cor_numVar[, dependent_variable], decreasing = TRUE))
+  
+# select only high corelations
+CorHigh = names(which(apply(cor_sorted, 1, function(x) abs(x)>0.05)))
+cor_numVar = cor_numVar[CorHigh, CorHigh]
+
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+
+# ## Plot Correlated Variables
+# dataset %>%
+#   ggplot(aes(x=TWL1, y=Ru1))+
+#   geom_point()+
+#   stat_smooth()
+# hist(dataset$TWL1)
+# hist(dataset$Ru1)
+
+# dataset %>%
+#   ggplot(aes(x=Distance_Offshore_Reef_Crest, y=Zone_Width_Reef_Flat))+
+#   geom_point()+
+#   stat_smooth()
+
+# hist(dataset$Zone_Width_Reef_Flat)
+# # hist(dataset$Distance_Offshore_Reef_Crest)
+  
+```
+There is small correlation between reef width and SRate but no other variables.
+
+
+
+
+
+
+## Variable Selection with LASSO
+
+
+
+```{r LASSO Selection 2}
+model_data <-st_drop_geometry(dataset)
+
+#Here I follow the example from Julia SIlge: https://juliasilge.com/blog/lasso-the-office/
+library(tidymodels)
+erosion_split <- initial_split(model_data, prop=7/8, strata = dependent_variable)
+
+erosion_train <- training(erosion_split)
+erosion_train %>% glimpse()
+
+erosion_test <- testing(erosion_split)
+erosion_test %>% glimpse()
+
+erosion_rec <- recipe(as.formula(paste(dependent_variable, "~ .")), data = erosion_train) %>%
+    step_zv(all_numeric(), -all_outcomes()) %>%
+    step_dummy(all_nominal(), one_hot = TRUE)%>%
+    # step_BoxCox(all_numeric(), -all_outcomes())%>%#We are scaling and standardizing the dummies as well as the numeric datahttps://stats.stackexchange.com/questions/69568/whether-to-rescale-indicator-binary-dummy-predictors-for-lasso
+    step_normalize(all_numeric(), -all_outcomes())
+
+erosion_prep <- erosion_rec
+
+###
+
+lasso_spec <- linear_reg(penalty = 0.1, mixture = 1) %>%
+  set_engine("glmnet")
+
+wf <- workflow() %>%
+  add_recipe(erosion_rec)
+
+lasso_fit <- wf %>%
+  add_model(lasso_spec) %>%
+  fit(data = erosion_train)
+
+lasso_fit %>%
+  pull_workflow_fit() %>%
+  tidy()
+
+
+###
+
+set.seed(1992)
+erosion_boot <- bootstraps(erosion_train, strata = dependent_variable)
+
+tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+lambda_grid <- grid_regular(penalty(), levels = 100)
+
+
+
+###
+doParallel::registerDoParallel()
+
+set.seed(1992)
+lasso_grid <- tune_grid(
+  wf %>% add_model(tune_spec),
+  resamples = erosion_boot,
+  grid = lambda_grid
+)
+
+###
+
+lasso_grid %>%
+  collect_metrics()
+
+
+###
+
+lasso_grid %>%
+  collect_metrics() %>%
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_errorbar(aes(
+    ymin = mean - std_err,
+    ymax = mean + std_err
+  ),
+  alpha = 0.5
+  ) +
+  geom_line(size = 1.5) +
+  facet_wrap(~.metric, scales = "free", nrow = 2) +
+  scale_x_log10() +
+  theme(legend.position = "none")
+
+###
+
+lowest_rmse <- lasso_grid %>%
+  select_best("rmse")
+
+final_lasso <- finalize_workflow(
+  wf %>% add_model(tune_spec),
+  lowest_rmse
+)
+
+###
+
+library(vip)
+
+final_lasso %>%
+  fit(erosion_train) %>%
+  pull_workflow_fit() %>%
+  vi(lambda = lowest_rmse$penalty) %>%
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance)
+  ) %>%
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL)
+
+
+last_fit(
+  final_lasso,
+  erosion_split
+) %>%
+  collect_metrics()
+
+```
+The lasso model selects for 5 out of the 7 variables. slope_Reef_Flat and Median_Depth_Reef_Flat are omitted.
+
+```{r Lasso Omitted Values 2}
+
+lasso_rejected_explanatory_variables<- final_lasso %>%
+  fit(erosion_train) %>%
+  pull_workflow_fit() %>%
+  vi(lambda = lowest_rmse$penalty) %>%
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance))%>%
+  filter(Importance==0)
+
+
+lasso_selected_dataset <- dataset[, !colnames(dataset) %in% lasso_rejected_explanatory_variables$Variable]
+
+
+
+```
+
+
+## Build OLS model using TidyModels
+Here the transformed data is centered around a mean of 0 and scaled so that the standard deviation is = 1. Thereafter a linear model is fit and the output is examined.
+
+```{r Build OLS Model 2}
+
+library(tidymodels)
+model_data<-st_drop_geometry(lasso_selected_dataset) %>%
+  ungroup()
+
+model_recipe <-
+    recipe(reg.eq, data=model_data)%>%
+  step_center(all_numeric_predictors())%>%
+  step_scale(all_numeric_predictors())%>%
+  prep
+
+lm_spec <- linear_reg() %>% set_engine("lm")
+
+
+lm_fit <- fit(lm_spec, reg.eq, data=bake(model_recipe, new_data = NULL))
+
+
+tidy(lm_fit)
+summary(lm_fit$fit)
+
+```
+5 of the 12 variables are significant.
+
+## Plot Model Results
+```{r Plot Model Results 2}
+#install.packages('scico')
+library(scico)
+
+tidy(lm_fit)%>%
+  ggplot(aes(x=term, y=p.value, fill=estimate, color=estimate))+
+  geom_point()+
+  geom_bar(stat="identity")+
+  geom_hline(yintercept = 0.05)+
+  scale_fill_scico("Coefficient",palette = 'vik', midpoint = 0)+
+  scale_color_scico("Coefficient",palette = 'vik', midpoint = 0)+
+  coord_flip()+
+  labs(x="",y="p")
+
+
+#Plot Residuals
+hist(lm_fit$fit$residuals)
+
+{par(mfrow=c(2,2)) # plot all 4 plots in one
+
+plot(lm_fit$fit, 
+     pch = 16,    # optional parameters to make points blue
+     col = '#006EA1')
+}
+```
+The vertical line in the above plot indicates a p value of 0.05. We can see that the width of the reef crest, wave energy incoming from the ocean, maximum depth of the reef flat, percentage of wave energy coming to shore, and distance of the reef flat offshore are all significant.
+
+```{r BootStrap Simple Regression 2}
+library(tidymodels)
+
+
+set.seed(1992)
+
+#GET CENTERED AND SCALED DATA for Regression
+data_boot <- model_data%>%
+    recipe(reg.eq)%>%
+    step_center(all_numeric_predictors())%>%
+    step_scale(all_numeric_predictors())%>%
+    prep %>% 
+    bake(NULL)
+###
+  fit_lm_on_bootstrap <- function(split) {
+  linear_reg() %>%
+  set_engine("lm")%>%
+  fit(reg.eq, data=bake(model_recipe, new_data = NULL))
+}
+
+
+#Bootstrap Resample the centered and scaled data
+bootstrap_data<- bootstraps(data_boot, times=1000, apparent = TRUE)
+
+erosion_models <- bootstrap_data %>%
+  mutate(
+    model = map(splits, ~ lm(reg.eq, data = .)),
+    coef_info = map(model, tidy))
+  
+
+
+
+erosion_coefs <- erosion_models %>%
+  unnest(coef_info)
+
+#glimpse(erosion_coefs)
+
+
+erosion_coefs <- erosion_coefs %>% filter(term != "(Intercept)")
+#erosion_coefs
+erosion_coefs<-as_tibble(erosion_coefs) %>%
+  select(-c(splits,model))
+
+
+library(rsample)
+conf_int<-int_pctl(erosion_models, coef_info, alpha = 0.05)
+
+conf_int<-conf_int%>% filter(term != "(Intercept)")
+conf_int<-as_tibble(conf_int)
+
+test<-left_join(erosion_coefs,conf_int, by="term")
+test <- test %>%
+  mutate(sig=if_else(p.value>0.05,">0.05","<0.05"))
+
+test %>%
+  ggplot(aes(x=estimate)) +
+  geom_histogram(position="identity", alpha=0.5, bins=15)+
+  labs(title="Bootstrap resample estimates with 95% confidence intervals",
+       x="Coefficient estimates",
+       y="Frequency")+
+    facet_wrap(~term, scales = "free")+
+  #shade_confidence_interval(endpoints = c(test$.lower,test$.upper), fill="gold", alpha=0.1, color=)
+  geom_vline(aes(xintercept=.lower))+
+  geom_vline(aes(xintercept=.upper))+
+  labs(title="Bootstrap resample estimates with 95% confidence intervals",
+       x="Coefficient estimates",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+### Plotting Bootstrap Coefficients
+library(scico)
+test%>%
+  ggplot(aes(x=term, y=estimate))+
+  geom_point(alpha=0.1, position=position_jitter(height=0, width=0.05), aes(color=sig)) +
+  stat_summary(fun=mean, geometry="point", fill="red", pch=21, size=3)+ 
+  stat_summary(fun.data=mean_cl_normal, geometry="errorbar", 
+               width=1, colour="red", alpha=0.7) +
+  scale_color_viridis_d("p value",guide = guide_legend(override.aes = list(size = 3,
+                                                                    alpha = 1) ))+
+  coord_flip()+
+  labs(caption="Fig x. Coefficient estimates from 1000 bootstrap resamples. Red dot = mean. Errorbars = 95% Confidence intervals")
+
+
+```
+
+To determine if points are spatially independent from oneanother I will save the residuals and calculate a Moran's I for them. If the Moran's I is more than 0 I will consider this evidence of spatial autocorrelation. Thereafter I will determine which linear model may address this for the final model.
+
+
+
+
+```{r Calculate Morans I 2}
+#install.packages("sfdep")
+
+library(sf)
+library(sfdep)
+library(dplyr)
+
+# grab geometry
+geo <- st_geometry(dataset)
+
+# grab transformed and scaled data
+geo_data<-st_drop_geometry(dataset)%>%
+    recipe(as.formula(paste(dependent_variable, "~ .")))%>%
+    # step_center(all_numeric_predictors())%>%
+    # step_scale(all_numeric_predictors())%>%
+    prep %>% 
+    bake(NULL)
+
+
+#save model residuals to our dataset
+geo_data_map$residuals<-lm_fit$fit$residuals
+
+#save file for external use
+st_write(geo_data_map,"geo_data_map_transformed_dataset.shp", append=FALSE)
+
+#### Calculating Neighbors ####
+#Calculate neighbors based on a distance band
+critical_threshold(st_geometry(geo_data_map))
+nb_dist <- st_dist_band(st_geometry(geo_data_map),  upper = critical_threshold(st_geometry(geo_data_map))) 
+
+#Calculate neighbors based on kneigherst neighbors
+nb_knear_8<- st_knn(geometry=st_geometry(geo_data_map), k = 8)
+
+
+#### Calculate Moran's I ####
+#*# Decide which neighbors to use
+neighbors <-nb_dist 
+
+#Create weights matrix
+wt <- st_weights(neighbors)
+
+#Compute the Moran I and Test to see if it is different from a random distribution
+moran<-sfdep::global_moran_test(geo_data_map$residuals,neighbors,wt)
+moran
+
+#Re-compute the Moran with a monte carlo simulation
+MC<-spdep::moran.mc(geo_data_map$residuals,spdep::nb2listw(neighbors,style = "C"), nsim=599)
+MC
+plot(MC,main="", las=1)
+
+#Extract Moran Data for Plotting
+moran_data<-spdep::moran.plot(geo_data_map$residuals,spdep::nb2listw(neighbors,style = "C"), return_df = TRUE, plot=FALSE)
+#trace(ggpubr:::.stat_lm, edit = TRUE) #https://stackoverflow.com/questions/66177005/im-using-stat-regline-equation-with-ggscatter-is-there-a-way-to-specify-the-si
+moran_data<-cbind(moran_data, geo_data)
+
+#Plot Moran Data
+moran_data %>%
+  ggplot(aes(x=x, y=wx, color=SRate_wgt_mean))+
+  geom_point()+
+  labs(x="Model Residuals", y="Spatially Lagged Residuals", caption=paste("Moran's I: ",round(moran$estimate[1],3)))+
+  geom_smooth(method= 'lm',formula = y~x, se = FALSE)+
+  geom_hline(yintercept = 0, linetype="dashed")+
+  geom_vline(xintercept = 0, linetype="dashed")+
+  scico::scale_color_scico("Shoreline Change Rate (m/yr)",midpoint = 0, palette = "roma")+
+  theme_dark()
+  # ggpubr::stat_regline_equation(mapping = NULL,
+  #                               data = NULL,
+  #                               formula = y ~ x,
+  #                               label.x.npc = "left",
+  #                               label.y.npc = "top",
+  #                               label.x = NULL,
+  #                               label.y = NULL,
+  #                               output.type = "expression",
+  #                               geometry = "text",
+  #                               position = "identity",
+  #                               na.rm = FALSE,
+  #                               show.legend = NA,
+  #                               inherit.aes = TRUE)
+
+```
+From the plots we see that our residuals are autocorrelated in space (similar values next to one another). Below I am going to address this by modeling the data using OLS, SLX, SAR, and SEM
+
+```{r Spatial Regressions 2, include=FALSE}
+library(spdep)
+library(spatialreg)
+#Neighbors= neighbors
+nb_list <- nb2listw(neighbors)
+#Weights =wt
+wt <- wt
+
+### Define Regression Equation ###
+lm_fit[["fit"]][["terms"]]
+reg.eq= as.formula(paste(dependent_variable, "~ ."))
+
+### Linear Model: OLS ###
+linear_model<-lm(reg.eq, data=data_boot)
+summary(linear_model)
+
+### SLX ###
+SLX_model <- spatialreg::lmSLX(reg.eq, data=data_boot, nb_list) #Does not work for K-nearest neighbors
+# summary(SLX_model)
+# impacts(SLX_model, nb_list) #Tells you how neighboring values impact the effects
+# summary(impacts(SLX_model, nb_list, R=500), zstats=TRUE)#tells you if the effects are significant
+
+### SAR: Spatial Lag Model ###
+SAR_model <- lagsarlm(reg.eq, data=data_boot, nb_list)
+# summary(SAR_model)
+# impacts(SAR_model,listw=nb_list)
+# summary(impacts(SAR_model,listw=nb_list, R=2000), zstats=TRUE)
+
+### SEM: Spatial Error Model ###
+SEM_model <-errorsarlm(reg.eq, data=data_boot, nb_list)
+# summary(SEM_model)
+# Hausman.test(SEM_model) # The high p value says that we cannot reject that the SEM_model is inappropriate
+
+### SDEM: Spatial  Durbin Error Model
+SDEM_model<-errorsarlm(reg.eq, data=data_boot, nb_list, etype="emixed")
+# summary(SDEM_model)
+# impacts(SDEM_model,listw=nb_list)
+# summary(impacts(SDEM_model,listw=nb_list, R=2000), zstats=TRUE)
+#Compare with maximul likelihood tests and AIC
+# AIC(linear_model)
+# AIC(SLX_model)
+# AIC(SAR_model)
+# AIC(SEM_model)
+# AIC(SDEM_model)
+
+cbind(c("Linear",
+        "SLX",
+        "SAR",
+        "SEM",
+        "SDEM"),
+      c(AIC(linear_model),
+AIC(SLX_model),
+AIC(SAR_model),
+AIC(SEM_model),
+AIC(SDEM_model)))
+
+###
+
+```
+
+Because I think my model is a local model (nearby values affecting nearby but not the entire dataset). I will focus on the local models. The Spatial Durbin Model will be compared to the SEM and the SLX
+
+```{r comparing local spatial models 2}
+summary(SDEM_model)
+impacts(SDEM_model,listw=nb_list)
+summary(impacts(SDEM_model,listw=nb_list, R=2000), zstats=TRUE)
+# None of the lagged values are statistically significant
+
+#LR Tests
+LR.Sarlm(SDEM_model,SEM_model)
+LR.Sarlm(SDEM_model,SLX_model)
+LR.Sarlm(SDEM_model,linear_model)
+LR.Sarlm(SDEM_model,SAR_model)
+
+
+#Also check AIC
+AIC(linear_model)
+AIC(SLX_model)
+AIC(SEM_model)
+AIC(SDEM_model)
+
+#The Test Indicates that I should Restrict the model to a spatial error model
+```
+
+The spatial DEM model has the lowest AIC and likelihood ratio test indicates that it is better than the spatial durbin error model. Now I will check the SEM model.
+
+```{r SEM model tests 2}
+
+### Heteroskedasticity
+bptest.Sarlm(SEM_model, studentize = TRUE)
+Hausman.test(SEM_model)
+#bptest.Sarlm(SDEM_model, studentize = TRUE)
+#The p value indicates that there is not significant heteroskedasticity @ an alpha of 0.05 and p value of 0.065
+
+### Pseudo R^2: 1-(sum of squared estimate of errors/
+1-(SEM_model$SSE/(var(data_boot$SRate_wgt_mean)*(length(data_boot$SRate_wgt_mean)-1)))
+
+summary(SEM_model)
+```
+The SEM model: SEM Spatial Error Model
+𝑦=𝑋𝛽+𝑢, 𝑢=𝜆𝑊𝑢+𝜀
+
+

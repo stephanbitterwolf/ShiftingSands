@@ -1,0 +1,150 @@
+---
+title: Comparing Shoreline Erosion of Reef Protected and Unprotected Coastlines after
+  Storm Events
+output:
+  html_document:
+    df_print: paged
+---
+
+Do shorelines protected by reefs experience less erosion than unprotected coasts? The answer to this question should depend on the timescale. In this code I examine the short term response by analyzing a metadataset recording the beach sediment lost after a storm event passes near or onto a coastline. Typically, beaches are assessed before and after the event and a volume loss/gain per meter of beach is recorded. Some studies state the significant wave height of the storm or high wave energy event. Others do not include that information. For studies that do not have Hs, I used a similar approach to Cuttler et al. (2018) by obtaining wave watch 3 hindcast data and selecting grids manually that are nearest to the study site. For the Martins et al. (2019) study, I backcalculate significant wave height from their wave energy plot on July 2015. The equation to calculate significant wave height (\(Hs\)) from energy density (\(E\)), density of seawater (\(\rho\)), and acceleration due to gravity (\(g\)) is:
+
+\[
+Hs = \sqrt{\frac{{8 \cdot E}}{{\rho \cdot g}}}
+\]
+
+The following code examines the metadataset and compares erosion rates for protected and unprotected beaches after storm events.
+
+
+# Obtain Data
+
+```{r Import Data}
+library(here)
+library(tidyverse)
+library(janitor)
+dataset<-read_csv(here("0_data", "shortterm_erosion_metadataset","01_Hs_vs_Erosion_vs_Beach_Type_dataset.csv"))
+
+glimpse(dataset) #lets look at the file
+
+#these names are badddddd. Lets fix that.
+dataset<-janitor::clean_names(dataset)
+colnames(dataset) #much better
+
+```
+
+Now that we have our data, we can visualize it and test for the assumptions of paramentric tests.
+
+
+```{r prepare for ttest}
+# Extract the data for the two groups: Protected (Group1) and Unprotected (Group2)
+Protected <- subset(dataset, beach_type == "Protected")$volume_change_m3_m
+Unprotected <- subset(dataset, beach_type == "Unprotected")$volume_change_m3_m
+
+
+# Assumption 1: Independence of samples
+# There may be some dependence from the Mahabot study
+
+# Assumption 2: Normality of sample distributions
+# Visual check for normality using histograms and Q-Q plots.
+{par(mfrow = c(2, 2))  # Create a 2x2 grid of plots
+hist(Protected, main = "Histogram of Protected Beaches")
+qqnorm(Protected, main = "Q-Q Plot of Protected Beaches")
+qqline(Protected)
+
+hist(Unprotected, main = "Histogram of Unprotected Beaches")
+qqnorm(Unprotected, main = "Q-Q Plot of Unprotected Beaches")
+qqline(Unprotected)}
+```
+
+The Reef Protected Data do not look normally distributed. It is also possible that there is a lack of independence between samples because the Mahabot study (for example) re-measures the same beaches for three different tropical storms. Two storms, TC Felleng and TC Bejisa, occur a month apart. I will test if removing these storms improves normality. If not I will switch to a non-parametric test.
+```{r removing storms}
+# Extract the data for the two groups: Protected (Group1) and Unprotected (Group2)
+Protected <-dataset %>%
+    select(c("study", "storm", "significant_wave_height_m","volume_change_m3_m", "beach_type", "waveheight_data_source"))%>%
+    filter(storm!="TC Felleng") %>%
+    filter(storm!="TC Bejisa") %>%
+    subset(beach_type == "Protected")%>%
+  pull(volume_change_m3_m)
+
+Unprotected <- subset(dataset, beach_type == "Unprotected")$volume_change_m3_m
+
+# Step 2: Check Normality (Assumption 2)
+# Visual check for normality using histograms and Q-Q plots.
+{par(mfrow = c(2, 2))  # Create a 2x2 grid of plots
+hist(Protected, main = "Histogram of Protected Beaches")
+qqnorm(Protected, main = "Q-Q Plot of Protected Beaches")
+qqline(Protected)
+
+hist(Unprotected, main = "Histogram of Unprotected Beaches")
+qqnorm(Unprotected, main = "Q-Q Plot of Unprotected Beaches")
+qqline(Unprotected)}
+
+```
+After removing the two storms, the dataset is not normally distributed. I could attempt transforming the dataset. However, a non-parametric test will be simpler to implement.
+
+
+# Non-Parametric Test
+
+I will perform the Mann-Whitney U test to test if these two sample distributions are significantly different from one another.
+
+```{r non-parametric test}
+Protected <- subset(dataset, beach_type == "Protected")$volume_change_m3_m
+Unprotected <- subset(dataset, beach_type == "Unprotected")$volume_change_m3_m
+result<-wilcox.test(Protected, Unprotected)
+result
+```
+
+The Wilcox test shows a significant difference between the two groups. Now I will proceed with a simple plot comparing the two groups.
+
+
+# Plotting Figure
+
+```{r plotting}
+p_value<-result$p.value
+# Define consistent colors for Transect Types
+transect_colors <- c("Reef Protected" = "#1f77b4", "Unprotected" = "#ff7f0e")
+
+dataset %>%
+  #replace "protected" with "reef protected"
+  mutate(beach_type=ifelse(beach_type=="Protected","Reef Protected",beach_type))%>%
+  ggplot(aes(x=beach_type, y=volume_change_m3_m, fill=beach_type))+
+  stat_boxplot(geom= 'errorbar' , width = 0.3, position = position_dodge(width = 0.75) ) +
+  geom_boxplot(show.legend = FALSE)+
+  labs(x = "Beach Type", y = bquote("Shoreline Volume Change (m"^3/m*")"),caption=("* Signifianctly different\nMann-Whitney U Test W=1155, p<0.001") )+
+  scale_fill_manual(values = transect_colors) +
+  geom_text(x = 1.5, y = 10, label =paste("*"), size=10)+
+  theme_classic()
+# +
+#   theme(
+#     axis.title.x = element_text(size = 14),       # Increase x-axis title font size
+#     axis.title.y = element_text(size = 14),       # Increase y-axis title font size
+#     axis.text.x = element_text(size = 12),        # Increase x-axis text font size
+#     axis.text.y = element_text(size = 12),        # Increase y-axis text font size
+#     plot.caption = element_text(size = 10),       # Increase caption font size
+#     plot.title = element_text(size = 16, hjust = 0.5),  # Increase title font size (if applicable)
+#     legend.text = element_text(size = 12),        # Increase legend text font size
+#     legend.title = element_text(size = 12)        # Increase legend title font size (if legend is present)
+#   )
+  
+
+dir.create(here("3_report", "metanalysis_figures"))
+figure_size<-600
+ggsave(here("3_report", "metanalysis_figures","boxplot_comparison.jpg"), width = 4*figure_size, height = 3*figure_size, dpi = 300 , units = "px", limitsize = FALSE)
+
+dataset %>%
+    #replace "protected" with "reef protected"
+  mutate(beach_type=ifelse(beach_type=="Protected","Reef Protected",beach_type))%>%
+  ggplot(aes(x=significant_wave_height_m, y=volume_change_m3_m, color=beach_type))+
+  geom_point()+
+  scale_color_manual(values = transect_colors) +
+
+  labs(x = "Significant Wave Height (m)", y = bquote("Shoreline Volume Change (m"^3/m*")"),caption=("*Signifianctly different\nMann-Whitney U Test:    W=1155, p<0.001"), color="Beach Type" )+
+  theme_classic()
+
+figure_size<-600
+ggsave(here("3_report", "metanalysis_figures","supplemental_4.jpg"), width = 4*figure_size, height = 3*figure_size, dpi = 300 , units = "px", limitsize = FALSE)
+
+dataset%>%
+  group_by(beach_type)%>%
+  summarize(mean=mean(volume_change_m3_m),
+            sd=sd(volume_change_m3_m))
+```

@@ -1,0 +1,407 @@
+---
+title: "5_reefs_and_erosion_analyses"
+author: "Stephan Bitterwolf"
+date: "2023-05-04"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+```
+# About This Code
+The main objective is to calculate variables for the reef and erosion dataset.
+
+***Data Analyses***
+Until this point we have completed some computationally intensive tasks. Here I Import the saved data and clean/plot it in different ways.
+```{r importing shapefiles, message=FALSE, warning=FALSE}
+library(sf)
+library(tidyverse)
+library(here)
+Coasts <- st_read(here("0_data", "coast", "HawaiiLandEditedByBitterwolf.shp"))
+
+Reefs_and_Erosion <- st_read(here("2_output", "modified_shapefiles","joined_databases", "reefs_and_erosion.gpkg"))
+
+
+
+# Reefs <- st_read(here("2_output", "modified_shapefiles","reefs", "reefs_merged.gpkg")) 
+ Erosion <- st_read(here("2_output", "modified_shapefiles","erosion", "erosion_merged_extended.gpkg")) 
+ Erosion<- st_set_crs(Erosion, 32604)
+# Transects <- st_read(here("2_output", "modified_shapefiles","transects", "transects_final.gpkg")) 
+# Seafloor <-read.csv(here("0_data", "seafloor","Maui_ElevationChange.csv"))
+  
+```
+
+In this section we remove NA values from columns of interest and remove any duplicates as well. You will notice that the number of usable values decreases as compared to the joined section. This is because some reef values are located inland. These "inland" values are ommitted.
+![](C:/Users/Stephan/CoastalResilienceLab Dropbox/HI Reef & Beach - MB, SB, BR/GIS_Data/Our_Work/02_Hawaii_Reefs_and_Erosion/Images_for_R_Markdown/Trimmed_Transects_no_overlap_with_reefs.JPG)
+This issue will resolve itself once I use the coastlines that Borja and others used for the reef transects. Alternatively, I can use the non-trimmed transects to get the match. However, then I am at risk of using points that are located inside of the coastlines.
+
+```{r Cleaning Data}
+#Create dataframe for Erosion and Reef Data
+E_vs_R <- as_tibble(st_drop_geometry(Reefs_and_Erosion))
+E_vs_R <- dplyr::rename(E_vs_R, WE_onspChg = WE_onsChg)
+E_vs_R <- E_vs_R %>% distinct(., Erosion_ID, .keep_all = TRUE)
+E_vs_R <- E_vs_R %>% drop_na(., Erosion_ID)
+
+#Are there any duplicated values
+table(duplicated(Reefs_and_Erosion$Erosion_ID))
+table(duplicated(E_vs_R$Erosion_ID))
+
+#Add columns to characterize change between reef scenarios
+E_vs_R <- E_vs_R %>% mutate(
+                    Ru_Chng = Ru2-Ru1,
+                    Ru_pChng = (Ru2-Ru1)/Ru1*100,
+                    ZS_Chng = ZS2-ZS1,
+                    ZS_pChng = (ZS2-ZS1)/ZS1*100,
+                    TWL_Chng = TWL2-TWL1,
+                    TWL_pChng = (TWL2-TWL1)/TWL1*100,
+                    Lf_Chng = Lf2-Lf1,
+                    Lf_pChng = (Lf2-Lf1)/Lf1*100,
+                    WEin_Chng = WEin2-WEin1,
+                    WEin_pChng = (WEin2-WEin1)/WEin1*100,
+                    WEout_Chng = WEout2-WEout1,
+                    WEout_pChng = (WEout2-WEout1)/WEout1*100
+                    )
+#Relocate columns
+E_vs_R <- E_vs_R %>% relocate(Ru_Chng, .after = Ru2)
+E_vs_R <- E_vs_R %>% relocate(Ru_pChng, .after = Ru_Chng)
+E_vs_R <- E_vs_R %>% relocate(ZS_Chng, .after = ZS2)
+E_vs_R <- E_vs_R %>% relocate(ZS_pChng, .after = ZS_Chng)
+E_vs_R <- E_vs_R %>% relocate(TWL_Chng, .after = TWL2)
+E_vs_R <- E_vs_R %>% relocate(TWL_pChng, .after = TWL_Chng)
+E_vs_R <- E_vs_R %>% relocate(Lf_Chng, .after = Lf2)
+E_vs_R <- E_vs_R %>% relocate(Lf_pChng, .after = Lf_Chng)
+E_vs_R <- E_vs_R %>% relocate(WEin_Chng, .after = WEin2)
+E_vs_R <- E_vs_R %>% relocate(WEin_pChng, .after = WEin_Chng)
+E_vs_R <- E_vs_R %>% relocate(WEout_Chng, .after = WEout2)
+E_vs_R <- E_vs_R %>% relocate(WEout_pChng, .after = WEout_Chng)
+
+#Save as CSV
+dir.create((here("2_output","dataframes")))
+write_csv(E_vs_R,here("2_output","dataframes","reefs_and_erosion.csv"))
+# test <- st_join(Reefs, Joined_Transects, join=st_intersects) #uses the trimmed transects
+# test <- as_tibble(test)
+# test2 <- test %>% distinct(., Erosion_ID, .keep_all = TRUE)
+# test3 <- test2 %>% drop_na(., Erosion_ID)
+# 
+# junk1 <- st_join(Reefs, Joined_Transects, join=st_intersects) #uses the original non-trimmed transects
+# junk1 <- as_tibble(junk1)
+# junk2 <- junk1 %>% distinct(., Erosion_ID, .keep_all = TRUE)
+# junk3<- junk2 %>% drop_na(., Erosion_ID)
+```
+
+```{r test sf manipulation}
+#Create dataframe for Erosion and Reef Data
+E_vs_R <- (Reefs_and_Erosion)
+
+E_vs_R <- E_vs_R %>%
+    mutate() %>%
+    rename(WE_onspChg = WE_onsChg)
+
+E_vs_R <- E_vs_R %>% distinct(., Erosion_ID, .keep_all = TRUE)
+E_vs_R <- E_vs_R %>% drop_na(., Erosion_ID)
+
+#Are there any duplicated values
+table(duplicated(Reefs_and_Erosion$Erosion_ID))
+table(duplicated(E_vs_R$Erosion_ID))
+
+#Add columns to characterize change between reef scenarios
+E_vs_R <- E_vs_R %>% mutate(
+                    Ru_Chng = Ru2-Ru1,
+                    Ru_pChng = (Ru2-Ru1)/Ru1*100,
+                    ZS_Chng = ZS2-ZS1,
+                    ZS_pChng = (ZS2-ZS1)/ZS1*100,
+                    TWL_Chng = TWL2-TWL1,
+                    TWL_pChng = (TWL2-TWL1)/TWL1*100,
+                    Lf_Chng = Lf2-Lf1,
+                    Lf_pChng = (Lf2-Lf1)/Lf1*100,
+                    WEin_Chng = WEin2-WEin1,
+                    WEin_pChng = (WEin2-WEin1)/WEin1*100,
+                    WEout_Chng = WEout2-WEout1,
+                    WEout_pChng = (WEout2-WEout1)/WEout1*100
+                    )
+#Relocate columns
+E_vs_R <- E_vs_R %>% relocate(Ru_Chng, .after = Ru2)
+E_vs_R <- E_vs_R %>% relocate(Ru_pChng, .after = Ru_Chng)
+E_vs_R <- E_vs_R %>% relocate(ZS_Chng, .after = ZS2)
+E_vs_R <- E_vs_R %>% relocate(ZS_pChng, .after = ZS_Chng)
+E_vs_R <- E_vs_R %>% relocate(TWL_Chng, .after = TWL2)
+E_vs_R <- E_vs_R %>% relocate(TWL_pChng, .after = TWL_Chng)
+E_vs_R <- E_vs_R %>% relocate(Lf_Chng, .after = Lf2)
+E_vs_R <- E_vs_R %>% relocate(Lf_pChng, .after = Lf_Chng)
+E_vs_R <- E_vs_R %>% relocate(WEin_Chng, .after = WEin2)
+E_vs_R <- E_vs_R %>% relocate(WEin_pChng, .after = WEin_Chng)
+E_vs_R <- E_vs_R %>% relocate(WEout_Chng, .after = WEout2)
+E_vs_R <- E_vs_R %>% relocate(WEout_pChng, .after = WEout_Chng)
+
+st_write(E_vs_R, here("2_output", "modified_shapefiles", "joined_databases","E_vs_R.gpkg"),delete_layer = TRUE)
+```
+
+
+
+``` {r Subsetting Data}
+library(sjmisc)
+#Select only values that are flagged as "Good" from the Storlazzi dataset AND values where the erosion rate does not equal "NA"
+RaE_sbst <- filter(Reefs_and_Erosion, flag == "Good", SRate_m != is.na(SRate_m))
+
+#Add Quantiles for WE_atten1 (https://stackoverflow.com/questions/7508229/how-to-create-a-column-with-a-quartile-rank)
+RaE_sbst <- within(RaE_sbst, WEA1_quar <- as.integer(cut(WE_atten1, quantile(WE_atten1, probs=0:4/4), include.lowest=TRUE)))
+RaE_sbst <- move_columns(data = RaE_sbst, WEA1_quar, .after = "WE_atten1") #move column
+RaE_sbst$WEA1_quar <- as.factor(RaE_sbst$WEA1_quar)
+
+#Add Quantiles for WEin1 (https://stackoverflow.com/questions/7508229/how-to-create-a-column-with-a-quartile-rank)
+RaE_sbst <- within(RaE_sbst, WEin1_quar <- as.integer(cut(WEin1, quantile(WEin1, probs=0:4/4), include.lowest=TRUE)))
+RaE_sbst <- move_columns(data = RaE_sbst, WEin1_quar, .after = "WEin1") #move column
+RaE_sbst$WEin1_quar <- as.factor(RaE_sbst$WEin1_quar)
+
+#Raw Quartile Values
+WEA1_quartiles <- quantile(RaE_sbst$WE_atten1, probs=0:4/4)
+WEin1_quartiles <- quantile(RaE_sbst$WEin1, probs=0:4/4)
+
+#Reorder Factors in AreaName (https://www.r-graph-gallery.com/267-reorder-a-variable-in-ggplot2.html)
+library(forcats)
+RaE_sbst <- RaE_sbst %>%
+  mutate(AreaName = fct_reorder(AreaName, Transect))
+
+#Add column for exposure to waves
+Exposed <- levels(RaE_sbst$AreaName)[1:7]
+Protected <- levels(RaE_sbst$AreaName)[8:30]
+
+RaE_sbst <- RaE_sbst %>%
+  mutate(Exposure = ifelse(AreaName %in% Exposed, "Exposed", "Protected"), .after = "AreaName")
+RaE_sbst$Exposure <- fct_rev(RaE_sbst$Exposure)
+
+# #Save File
+# write.csv(st_drop_geometry(select(RaE_sbst,1:52)),"Data_Analyses/00_RaE_sbst.csv", row.names = FALSE)
+
+
+# ## Overlapping values with NA
+# print("Overlapping values with NA")
+# table(RaE_sbst$island_erosion)
+# 
+# ##Overlapping values without NA
+# print("Overlapping values without NA")
+# table(na.omit(RaE_sbst)$island_erosion)
+# 
+# #NAs per island
+# print("NAs per island")
+# table(RaE_sbst$island_x)-table(na.omit(RaE_sbst)$island_x)
+```
+# Plotting Data
+
+```{r Plotting, message=FALSE, warning=FALSE}
+library(ggridges)
+library(ggpubr)
+#Change the leveling of the island column
+levels(RaE_sbst$island_reef) <- c("Maui", "Oahu", "Kauai")
+#Create Density Plots
+  
+  #Wave Energy Input
+      ggplot(RaE_sbst, aes(x = WEin1,  y = FID_, fill = factor(stat(quantile))))+
+        stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,
+          quantiles = 4, quantile_lines = TRUE)+
+        scale_fill_viridis_d(name = "Quartiles")+
+        ggtitle("Wave Energy Input")+
+        xlab("Wave Energy Input")+
+        theme_dark()
+
+  #Wave Energy Attenuation
+      ggplot(RaE_sbst, aes(x = WE_atten1,  y = island_reef, fill = factor(stat(quantile))))+
+        stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,
+          quantiles = 4, quantile_lines = TRUE, from = 0, to = 100)+
+        scale_fill_viridis_d(name = "Quartiles")+
+        ggtitle("Wave Energy Attenuation")+
+        xlab("Wave Energy Attenuation (%)")+
+        theme_dark()
+  #Coastal Erosion Rate
+      ggplot(RaE_sbst, aes(x = SRate_m, y = island_reef, fill = factor(stat(quantile))))+
+        stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,
+          quantiles = 4, quantile_lines = TRUE)+
+        scale_fill_viridis_d(name = "Quartiles")+
+        ggtitle("Historic Coastal Erosion")+
+        xlab("Coastal Erosion (m/yr)")+
+        theme_dark()
+      
+      
+#Plot Relationships 
+  #Between Wave Energy Attenuation and Coastal Erosion Rate
+      ggplot(RaE_sbst, aes(x= WE_atten1, y= SRate_m, color = WEin1))+
+        geom_point(alpha=5/10)+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 0, label.y = 1.3) +
+        stat_regline_equation(label.x = 0, label.y = 1.2)+
+        ggtitle("Wave Energy Attenuation vs. Historic Shoreline Change")+
+        scale_color_viridis_c("Wave Energy Input", option = "B")+
+        xlab("Wave Energy Attenuation (%)")+
+        ylab("Historic Shoreline Change Rate (m/yr)")+
+        #facet_wrap(vars(WEin1_quar))+
+        theme_dark()
+      # ggsave("02_WEA1_vs_Erosion.png", width = 8, height = 6, dpi = 300)
+  #Between Wave Energy Attenuation and Coastal Erosion Rate BY WEin1 quartile
+      ggplot(RaE_sbst, aes(x= WE_atten1, y= SRate_m, color = WEin1))+
+        geom_point(alpha=5/10)+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 0, label.y = 1.5) +
+        stat_regline_equation(label.x = 0, label.y = 1.2)+
+        ggtitle("Wave Energy Attenuation vs. Historic Coastal Change")+
+        scale_color_viridis_c("Wave Energy Input", option = "B")+
+        xlab("Wave Energy Attenuation (%)")+
+        ylab("Historic Coastal Change Rate (m/yr)")+
+        facet_wrap(vars(WEin1_quar))+
+        theme_dark()
+      # ggsave("03_WEA1_vs_Erosion_WEin1_quart.png", width = 8, height = 6, dpi = 300)
+  
+  #Between Wave Energy Input and Coastal Erosion Rate
+      ggplot(RaE_sbst, aes(x= WEin1, y= SRate_m, color = WE_atten1))+
+        geom_point()+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 750, label.y = 1.4) +
+        stat_regline_equation(label.x = 750, label.y = 1.3)+
+        ggtitle("Wave Energy Input vs. Historic Shoreline Change")+
+        scale_color_viridis_c("Wave Energy Attenuation (%)",option = "B")+
+        xlab("Wave Energy Input")+
+        ylab("Historic Shoreline Change Rate (m/yr)")+
+        theme_dark()
+      # ggsave("01_WEin1_vs_Erosion.png", width = 8, height = 6, dpi = 300)
+
+  #Between Wave Energy Input and Coastal Erosion Rate BY WEA quartile
+      ggplot(RaE_sbst, aes(x= WEin1, y= SRate_m, color = WE_atten1))+
+        geom_point()+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 550, label.y = 1.5) +
+        stat_regline_equation(label.x = 550, label.y = 1.3)+
+        ggtitle("Wave Energy Input vs. Historic Coastal Erosion")+
+        scale_color_viridis_c("WE Atten (%)",option = "B")+
+        xlab("Wave Energy Input")+
+        ylab("Historic Shoreline Change Rate (m/yr)")+
+        facet_wrap(vars(WEA1_quar))+
+        theme_dark()
+      # ggsave("04_WEin1_vs_Erosion_WEA_quart.png", width = 8, height = 6, dpi = 300)
+      
+      
+      ggplot(RaE_sbst, aes(x= WEin1, y= WE_atten1, color = WE_atten1))+
+        geom_point()+
+        #geom_smooth(method = "lm")+
+        #stat_cor(label.x = 750, label.y = 20) +
+        #stat_regline_equation(label.x = 750, label.y = 15)+
+        ggtitle("Wave Energy Input vs. Wave Energy Attenuation")+
+        scale_color_viridis_c("Wave Energy Attenuation (%)",option = "B")+
+        xlab("Wave Energy Input")+
+        ylab("Wave Attenuation (%)")+
+        #facet_wrap(vars(WEin1_quar))+
+        geom_vline(mapping = NULL,data = NULL,xintercept = c(WEin1_quartiles[2],WEin1_quartiles[3],WEin1_quartiles[4]), na.rm = FALSE,show.legend = NA)+
+        geom_text(x=((WEin1_quartiles[2]-WEin1_quartiles[1])/2), y=103, label="1", color = "orange")+ 
+        geom_text(x=((WEin1_quartiles[3]-WEin1_quartiles[2])/2+WEin1_quartiles[2]), y=103, label="2", color = "orange")+ 
+        geom_text(x=((WEin1_quartiles[4]-WEin1_quartiles[3])/2+WEin1_quartiles[3]), y=103, label="3", color = "orange")+
+        geom_text(x=((WEin1_quartiles[5]-WEin1_quartiles[4])/2+WEin1_quartiles[4]), y=103, label="4", color = "orange")+
+        
+        geom_hline(mapping = NULL,data = NULL,yintercept = c(WEA1_quartiles[2],WEA1_quartiles[3],WEA1_quartiles[4]), na.rm = FALSE,show.legend = NA)+
+        geom_text(y=((WEA1_quartiles[2]-WEA1_quartiles[1])/2), x=-10, label="1", color = "orange")+ 
+        geom_text(y=((WEA1_quartiles[3]-WEA1_quartiles[2])/2+WEA1_quartiles[2]), x=-10, label="2", color = "orange")+ 
+        geom_text(y=((WEA1_quartiles[4]-WEA1_quartiles[3])/2+WEA1_quartiles[3]), x=-10, label="3", color = "orange")+
+        geom_text(y=((WEA1_quartiles[5]-WEA1_quartiles[4])/2+WEA1_quartiles[4]), x=-10, label="4", color = "orange")+
+        theme_dark()
+      # ggsave("05_WEin1_vs_WEA_quart.png", width = 8, height = 6, dpi = 300)
+```
+
+## Wave Energy Quartile
+**By Wave Energy Attenuation Quantile**
+
+```{r WEA Quantile, message=FALSE, warning=FALSE}
+#Plot Exposed and Protected Sites
+library(ggspatial)
+bbox <- st_bbox(filter(Erosion))
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = RaE_sbst, aes(color= WEA1_quar))+
+  #geom_text(data = sites2, aes(x=st_coordinates(sites2)[,1], y=st_coordinates(sites2)[,2], label = AreaName ))+
+  scale_color_viridis_d("Quartile", option="C")+
+  theme(legend.position = "none")+
+  xlim(bbox[1]-5000, bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+ 
+  ylab("Latitude")+
+  ggtitle("Wave Energy Attenuation Quartiles")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+ggsave("WEAquar_map.png", dpi = 300, height = 11, width = 8.5)
+#Create Density Plots
+  #Wave Energy Input
+  ggplot(RaE_sbst, aes(x = WEin1,  y = WEA1_quar, fill = factor(stat(quantile))))+
+    stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,
+      quantiles = 4, quantile_lines = TRUE)+
+    scale_fill_viridis_d(name = "Quartiles")+
+    ggtitle("Wave Energy Input By Site")+
+    xlab("Wave Energy Input")+
+    ylab("Wave Energy Attenuation Quartile")+
+    theme_dark()
+    #ggsave("WEin1_Maui.png", width = 7, height = 7, dpi = 300)
+  #Wave Energy Attenuation
+    ggplot(RaE_sbst, aes(x = WE_atten1,  y = WEA1_quar, fill = factor(stat(quantile))))+
+      stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,
+        quantiles = 4, quantile_lines = TRUE)+
+      scale_fill_viridis_d(name = "Quartiles")+
+      ggtitle("Wave Energy Attenuation By Site")+
+      xlab("Wave Energy Attenuation")+
+      ylab("Wave Energy Attenuation Quartile")+
+      theme_dark()
+      #ggsave("WEin1_Maui.png", width = 7, height = 7, dpi = 300)    
+  #Coastal Erosion Rate
+    ggplot(RaE_sbst, aes(x = SRate_m,  y = WEA1_quar, fill = factor(stat(quantile))))+
+      stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE,
+        quantiles = 4, quantile_lines = TRUE)+
+      scale_fill_viridis_d(name = "Quartiles")+
+      ggtitle("Historic Shoreline Change Rate By Site")+
+      ylab("Historic Shoreline Change Rate (m/yr)")+
+      ylab("Wave Energy Attenuation Quartile")+
+      theme_dark()
+      #ggsave("WEin1_Maui.png", width = 7, height = 7, dpi = 300)
+#Plot Relationships 
+  #Between Wave Energy Attenuation and Coastal Erosion Rate
+      ggplot(RaE_sbst, aes(x= WE_atten1, y= SRate_m, color = WEin1))+
+        geom_point()+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 0, label.y = 1.3) +
+        stat_regline_equation(label.x = 0, label.y = 1.0)+
+        #facet_wrap(vars(WEA1_quar))+
+        ggtitle("Wave Energy Attenuation vs. Historic Shoreline Change")+
+        scale_color_viridis_c("Wave Energy Input", option = "B")+
+        xlab("Wave Energy Attenuation (%)")+
+        ylab("Historic Shoreline Change Rate (m/yr)")+
+        theme_dark()  
+      ggsave("WEA_vs_erosion.png", dpi = 300, height = 6, width = 8)
+  #Between Wave Energy Input and Coastal Erosion Rate
+      ggplot(RaE_sbst, aes(x= WEin1, y= SRate_m))+
+        geom_point()+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 750, label.y = 1.3) +
+        stat_regline_equation(label.x = 750, label.y = 1)+
+        facet_wrap(vars(WEA1_quar))+
+        ggtitle("Wave Energy Input vs. Historic Shoreline Change")+
+        xlab("Wave Energy Input")+
+        ylab("Historic Shoreline Change Rate (m/yr)")+
+        theme_dark()
+    ggsave("WEin1_vs_erosion_by_WEA.png", dpi = 300, height = 6, width = 8)
+    
+ggplot(RaE_sbst, aes(x= WEin1, y= SRate_m, color = WE_atten1))+
+        geom_point()+
+        geom_smooth(method = "lm")+
+        stat_cor(label.x = 250, label.y = 1.3) +
+        stat_regline_equation(label.x = 250, label.y = 1.1)+
+        facet_grid(WEA1_quar ~ island_reef)+
+        ggtitle("Wave Energy Input vs. Historic Coastal Erosion by WEA Quartile")+
+        scale_color_viridis_c("Wave Energy Attenuation (%)",option = "B")+
+        xlab("Wave Energy Input")+
+        ylab("Historic Coastal Erosion Rate (m/yr)")+
+        theme_dark()
+  ggsave("WEAquar_vs_Erosion_vs_WEin_vs_island_reef.png", dpi = 300, height = 11, width = 8.5)
+```

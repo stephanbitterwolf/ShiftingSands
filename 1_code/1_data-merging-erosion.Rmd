@@ -1,0 +1,66 @@
+---
+title: "Merging_Fletcher_Data"
+author: "Stephan Bitterwolf"
+date: "1/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# About this code
+This code joins the erosion values from each island into one file.
+
+```{r merge shapefiles}
+library(foreign) #required to load .dbf files
+library(dplyr) #data manipulation
+library(ggplot2) #data plotting
+library(ggmap)#data for basemaps
+library(sf)#for joining shapefiles
+library(here)
+library(tibble)
+islands = c("Oahu","Maui", "Kauai") #Create Island Names
+#https://stackoverflow.com/questions/53507133/combining-multiple-shapefiles-in-r
+for (island in islands) {
+  path<- paste(here("0_data","erosion"),"/", island,"_Historic_M.shp",sep="")
+  print(path)
+  data <- st_read(path)
+  data <- st_transform(data, 32604)
+  data$island <- island
+  assign(paste(island,"_shape", sep=""),data)
+  plot(st_geometry(data))
+}
+
+Hawaii_shape<- rbind(Maui_shape, Oahu_shape, Kauai_shape)
+Hawaii_shape <- Hawaii_shape %>%
+  select(-island)
+Hawaii_shape<-rowid_to_column(Hawaii_shape,var = "ero_ID")
+```
+
+The dataset is now joined but contains lines that do not intersect the coast. Here I use remote packages that allow me to run QGIS commands in R. The command I use extends the lines in the original dataset by 100m on either side.
+
+```{r Extend Lines}
+ # install.packages("remotes")
+ # remotes::install_github("JanCaha/r_package_qgis")
+
+
+result<-qgis::qgis_extendlines(INPUT = Hawaii_shape,
+                               START_DISTANCE = 100,
+                               END_DISTANCE = 100) %>% st_as_sf()
+
+bbox<-st_bbox(result[1:2,])
+ggplot(result)+
+  geom_sf(color="blue")+
+    xlim(bbox[1], bbox[3])+
+    ylim(bbox[2], bbox[4])+
+  geom_sf(data=Hawaii_shape, color="red")
+
+
+dir.create(paste(here("2_output","modified_shapefiles"),"/erosion",sep=""))           
+st_write(Hawaii_shape, paste(here("2_output","modified_shapefiles","erosion"),"/erosion_merged_extended.gpkg", sep=""),delete_layer = TRUE)
+
+```
+
+```
+
+

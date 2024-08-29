@@ -1,0 +1,221 @@
+---
+title: "15_xbeach_output_visualization"
+
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+```
+
+
+
+# About
+Here I import the xbeach outputs and visualize the results in a simple line graph. First I plot the entire maximum wave energy profile. Then I focus on the section closest to the -3m depth (the wave energy output location). I do this for xbeach runs using 8 m significant wave heights and then for xbeach runs with 2 m significant wave heights.
+
+
+# 8m waves
+
+## Non-Reef
+
+```{r working with netcdf non-reef 8 m waves}
+library(ncdf4)
+library(here)
+library(tidyverse)
+non_reef_lower_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "non-reef", "0_lower_sea_level","xboutput-lower_sl.nc"))
+non_reef_current_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "non-reef", "1_current_sea_level","xboutput_current_sl.nc"))
+
+
+lower_emax<-ncvar_get(non_reef_lower_sl,"E_max")
+current_emax<-ncvar_get(non_reef_current_sl,"E_max")
+
+data<-as_tibble(cbind(lower_emax,current_emax))
+data<-data%>%
+  rownames_to_column()%>%
+  rename(distance= rowname)%>%
+  mutate(distance=(as.numeric(distance)*5-5))%>%
+  mutate(distance_from_3m_depth=distance-1375)
+
+#rename columns for pivoting
+data<-data %>%
+  rename("Lower Sea Level"=lower_emax,
+         "Current Sea Level"= current_emax)
+
+data<-pivot_longer(data, 
+                   cols = c("Lower Sea Level", "Current Sea Level"), 
+                   names_to = "Sea Level Scenario", 
+                   values_to = "Maximum Wave Energy (Nm/m^2)")
+
+
+data%>%
+  ggplot(aes(x=distance, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+  labs(title="Effect of Sea level Rise on onshore wave energy for non-reef protected coast:\n8 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -30 m depth contour")
+
+data%>%
+  filter(distance_from_3m_depth>=-10 & distance_from_3m_depth<=10 )%>%
+  ggplot(aes(x=distance_from_3m_depth, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+  labs(title="Effect of Sea level Rise on onshore wave energy for non-reef protected coast: \n8 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -3 m depth contour")
+```
+
+## Reef
+
+
+```{r working with netcdf reefs 8 m waves}
+library(ncdf4)
+library(here)
+library(tidyverse)
+reef_lower_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "reef", "0_lower_sea_level","xboutput_reef_lower_sl.nc"))
+reef_current_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "reef", "1_current_sea_level","xboutput_reef_current_sl.nc"))
+
+
+lower_emax<-ncvar_get(reef_lower_sl,"E_max")
+current_emax<-ncvar_get(reef_current_sl,"E_max")
+data<-as_tibble(cbind(lower_emax,current_emax))
+data<-data%>%
+  rownames_to_column()%>%
+  rename(distance= rowname)%>%
+  mutate(distance=(as.numeric(distance)*5-5))%>%
+  mutate(distance_from_3m_depth=distance-1120)
+
+#rename columns for pivoting
+data<-data %>%
+  rename("Lower Sea Level"=lower_emax,
+         "Current Sea Level"= current_emax)
+
+data<-pivot_longer(data, 
+                   cols = c("Lower Sea Level", "Current Sea Level"), 
+                   names_to = "Sea Level Scenario", 
+                   values_to = "Maximum Wave Energy (Nm/m^2)")
+
+data%>%
+  ggplot(aes(x=distance, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+  labs(title="Effect of Sea level Rise on onshore wave energy for reef protected coast:\n8 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -30 m depth contour")
+
+data%>%
+  filter(distance_from_3m_depth>=-10 & distance_from_3m_depth<=10 )%>%
+  ggplot(aes(x=distance_from_3m_depth, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+ labs(title="Effect of Sea level Rise on onshore wave energy for reef protected coast:\n8 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -3 m depth contour")
+
+```
+
+
+
+# 2m waves
+
+## Non-Reef
+
+
+```{r working with netcdf non-reef 2 m waves}
+library(ncdf4)
+library(here)
+library(tidyverse)
+non_reef_lower_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "non-reef", "0_lower_sea_level-2m_waves","xboutput.nc"))
+non_reef_current_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "non-reef", "1_current_sea_level-2m_waves","xboutput.nc"))
+
+
+lower_emax<-ncvar_get(non_reef_lower_sl,"E_max")
+current_emax<-ncvar_get(non_reef_current_sl,"E_max")
+
+data<-as_tibble(cbind(lower_emax,current_emax))
+data<-data%>%
+  rownames_to_column()%>%
+  rename(distance= rowname)%>%
+  mutate(distance=(as.numeric(distance)*5-5))%>%
+  mutate(distance_from_3m_depth=distance-1120)
+
+#rename columns for pivoting
+data<-data %>%
+  rename("Lower Sea Level"=lower_emax,
+         "Current Sea Level"= current_emax)
+
+data<-pivot_longer(data, 
+                   cols = c("Lower Sea Level", "Current Sea Level"), 
+                   names_to = "Sea Level Scenario", 
+                   values_to = "Maximum Wave Energy (Nm/m^2)")
+
+data%>%
+  ggplot(aes(x=distance, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+  labs(title="Effect of Sea level Rise on onshore wave energy for non-reef protected coast:\n2 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -30 m depth contour")
+
+data%>%
+  filter(distance_from_3m_depth>=-10 & distance_from_3m_depth<=10 )%>%
+  ggplot(aes(x=distance_from_3m_depth, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+  labs(title="Effect of Sea level Rise on onshore wave energy for non-reef protected coast:\n2 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -3 m depth contour")
+```
+
+
+
+
+
+## Reef
+
+
+```{r working with netcdf reefs 2 m waves}
+library(ncdf4)
+library(here)
+library(tidyverse)
+reef_lower_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "reef", "0_lower_sea_level-2m_waves","xboutput.nc"))
+reef_current_sl<-nc_open(here("7_XBEACH","Camila_Fixed", "reef", "1_current_sea_level-2m_waves","xboutput.nc"))
+
+
+lower_emax<-ncvar_get(reef_lower_sl,"E_max")
+current_emax<-ncvar_get(reef_current_sl,"E_max")
+
+data<-as_tibble(cbind(lower_emax,current_emax))
+data<-data%>%
+  rownames_to_column()%>%
+  rename(distance= rowname)%>%
+  mutate(distance=(as.numeric(distance)*5-5))%>%
+  mutate(distance_from_3m_depth=distance-1120)
+
+#rename columns for pivoting
+data<-data %>%
+  rename("Lower Sea Level"=lower_emax,
+         "Current Sea Level"= current_emax)
+
+data<-pivot_longer(data, 
+                   cols = c("Lower Sea Level", "Current Sea Level"), 
+                   names_to = "Sea Level Scenario", 
+                   values_to = "Maximum Wave Energy (Nm/m^2)")
+
+data%>%
+  ggplot(aes(x=distance, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+  labs(title="Effect of Sea level Rise on onshore wave energy for reef protected coast:\n2 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -30 m depth contour")
+
+data%>%
+  filter(distance_from_3m_depth>=-10 & distance_from_3m_depth<=10 )%>%
+  ggplot(aes(x=distance_from_3m_depth, y=`Maximum Wave Energy (Nm/m^2)`, color=`Sea Level Scenario`))+
+  geom_line()+
+ labs(title="Effect of Sea level Rise on onshore wave energy for reef protected coast:\n2 m waves",
+       y="Maximum Wave Energy",
+       x="Distance (m) from -3 m depth contour")
+
+```

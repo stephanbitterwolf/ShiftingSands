@@ -1,0 +1,11 @@
+﻿Column,Description
+Study,The study measuring erosion rates
+Site Name,The location of where the data was acquired
+Storm,The name of the storm
+Significant Wave Height (m),The significant wave height
+Sig. Wave Height SD,The standard deviation of the wave height (when available)
+Wave Energy_J_m^2,The wave energy associated with the significant wave height
+Volume Change (m3/m),The volumetric change in the beach area
+vol SD,The standard deviation of the volumetric change
+Beach Type,The kind of beach: reef protected or unprotected
+Waveheight Data Source,The source of the wave height values (measured in the study vs obtained from wave watch III)

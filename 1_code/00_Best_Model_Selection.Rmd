@@ -1,0 +1,1088 @@
+---
+title: "00_Best_Model_Selection"
+author: "Stephan Bitterwolf"
+date: "9/17/2021"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE)
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 100px;
+}
+
+.btn {
+    border-width: 0px 0px 0px;
+    font-weight: normal;
+    text-transform: ;
+}
+.btn-default {
+    color: #2ecc71;
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+```
+
+
+# Importing and Subsetting Data
+```{r import and subset data, message=FALSE}
+
+df <-read.csv("Erosion_and_Reefs.csv", row.names = NULL)
+library(dplyr)
+df <- as_tibble(df)
+
+df_sbst <- df %>% 
+  dplyr::filter(flag == "Good") %>% #exclude values where reefs are better at reducing wave energy AFTER 1 m reef height was lost
+  dplyr::filter(Lr2c1 > -2) %>% #exclude values where the reef is "onshore" a distance greater than 2 m
+  dplyr::select(SRate_m, Ru1, Ru_Chng, Ru_pChng, ZS1, ZS_Chng, ZS_pChng, TWL1, TWL_Chng, TWL_pChng, Lf1, Lf_Chng, Lf_pChng, WEin1, WEout1, WEout_Chng, WEout_pChng, hrf0, hrfmin, Lr2c1, hr2c1, Lreef1, WEred, TWLred, Zsred, WE_onshr1, WE_onshr2, WE_onspChg, Dist_2_Cst)
+
+#remove rows containing NA
+df_sbst <- na.omit(df_sbst)
+
+#Change all classes to numeric
+cat("Data Classes Before Conversion:")
+table(sapply(df_sbst, class))
+df_sbst <- sapply(df_sbst, as.numeric)
+df_sbst <- as_tibble(df_sbst)
+
+cat("\n")
+cat("\n")
+
+cat("Data Classes After Conversion:")
+table(sapply(df_sbst, class))
+
+#Save Categorical Data
+categorical <- na.omit(df) %>% 
+  dplyr::filter(flag == "Good") %>% #exclude values where reefs are better at reducing wave energy AFTER 1 m reef height was lost
+  dplyr::filter(Lr2c1 > -2) %>% #exclude values where the reef is "onshore" a distance greater than 2 m
+  dplyr::select(island_x, AreaName)
+df_sbst$Island <- categorical$island_x
+df_sbst$AreaName <- categorical$AreaName
+
+rm(categorical)
+
+###Transform data such that a log or Sqrt transformation can be applied to the dependent variable
+library(tidyverse)
+df_sbst <- df_sbst %>%
+  mutate(Island = fct_relevel(Island, levels = "Maui", "Oahu", "Kauai")) #Relevel so that Maui comes first (Moving from East to West)
+df_transformed <- df_sbst
+df_transformed$SRate_trans <- df_transformed$SRate_m + abs(min(df_transformed$SRate_m))+1
+df_transformed <- df_transformed %>% dplyr::select(-SRate_m) %>% relocate(SRate_trans, .before = Ru1)
+
+###Make Variables Linear
+library(car)
+df_transformed <- df_transformed %>% 
+  mutate(logit_WE_onshr1 = logit(WE_onshr1, percents = TRUE), 
+         logit_WE_onshr2 = logit(WE_onshr2, percents = TRUE), 
+         fold_WE_onsh_Chg = (WE_onspChg/100), 
+         fold_Ru_Chng = (Ru_pChng/100),
+         fold_ZS_Chng = (ZS_pChng/100),
+         fold_TWL_Chng = (TWL_pChng/100),
+         fold_Lf_Chng = (Lf_pChng/100),
+         #fold_WEin_Chng = (WEin_pChng/100),
+         fold_WEout_Chng = (WEout_pChng/100),
+         .keep = "unused")
+
+#Add Unique Island and AreaName Column
+df_transformed$Islxnam <- paste(df_transformed$Island," @ ", df_transformed$AreaName, sep="")
+
+#Move String Columns to End of Dataframe
+df_transformed <- df_transformed %>% relocate(c(Island, AreaName, Islxnam), .after = last_col())
+
+#Move new columns
+df_transformed <- df_transformed %>% relocate(fold_Ru_Chng, .after = Ru_Chng)
+df_transformed <- df_transformed %>% relocate(fold_ZS_Chng, .after = ZS_Chng)
+df_transformed <- df_transformed %>% relocate(fold_TWL_Chng, .after = TWL_Chng)
+df_transformed <- df_transformed %>% relocate(fold_Lf_Chng, .after = Lf_Chng)
+#df_transformed <- df_transformed %>% relocate(fold_WEin_Chng, .after = WEin_Chng)
+
+###Remove Variables Highly Correlated with One Another
+df_transformed <- df_transformed %>% dplyr::select(-c(Zsred, fold_WEout_Chng, WEred, TWLred, hrf0))
+
+df_numeric <- df_transformed %>% dplyr::select_if(is.numeric)
+```
+
+# Stepwise Model Selection With Outliers
+
+```{r StepWise Model Selection, message=FALSE, warning=FALSE}
+library(MASS)
+library(sjPlot)
+library(plotly)
+
+full <- glm (SRate_trans~., family = gaussian, data = df_numeric)
+
+stepwise_model <- stepAIC(full, trace = FALSE)
+
+tab_model(stepwise_model, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(stepwise_model, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+# coef_plot$sign <-c("Negative")
+# coef_plot$sign <- coef_plot %>% filter(estimate > 0)
+# coef_plot %>% mutate(test = ifelse(estimate < 0, "Negative", "Positive"))
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_stepwise_model<- coef_plot %>% 
+  dplyr::filter(p.value<=.05) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: Stepwise (+outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_stepwise_model
+```
+
+```{r Variance Inflation Calculation for STEP Model}
+library(car)
+autocor <- vif(stepwise_model)
+
+#names(autocor)
+autocor <- data.frame(names(autocor), autocor)
+names(autocor) <-c("Variable", "VIF")
+rownames(autocor) <- c()
+
+autocor<-autocor %>% 
+  dplyr::arrange(desc(VIF)) 
+
+vars_to_examine <- autocor %>% filter(VIF>5)
+df_autocor <- df_numeric %>% dplyr::select(vars_to_examine$Variable)
+
+autocor
+```
+
+```{r Correlation Matrix for STEP Model, echo=FALSE}
+  library(reshape2)
+    library(ggplot2)  
+  cormat <- round(cor(df_autocor),2)
+  #Remove 1/2 of the correlations
+  # Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+  }
+  # Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+
+    reorder_cormat <- function(cormat){
+    # Use correlation between variables as distance
+    dd <- as.dist((1-cormat)/2)
+    hc <- hclust(dd)
+    cormat <-cormat[hc$order, hc$order]
+  }
+  
+  # Reorder the correlation matrix
+  cormat <- reorder_cormat(cormat)
+  lower_tri <- get_lower_tri(cormat)
+  # Melt the correlation matrix
+  melted_cormat <- melt(lower_tri, na.rm = TRUE)
+  melted_cormat<- melted_cormat %>% filter(Var1 != Var2) 
+  melted_cormat<- melted_cormat %>% filter(abs(value)>0.7)
+  
+  {library(ggplot2)
+  ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+    geom_tile(color = "white")+
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                         midpoint = 0, limit = c(-1,1), space = "Lab", 
+                         name="Pearson\nCorrelation") +
+    theme_minimal()+ # minimal theme
+    theme(axis.text.x = element_text(angle = 45, vjust = 0,size = 12, hjust = 0))+
+    scale_x_discrete(position = "top")+
+    coord_fixed()
+  # Print the heatmap
+
+  
+  ggheatmap2<- ggheatmap + 
+    geom_text(aes(Var2, Var1, label = value), color = "black", size = 2) +
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      #panel.grid.major = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      axis.ticks = element_blank(),
+      legend.justification = c(1, 0),
+      legend.position = c(1, 0),
+      legend.direction = "horizontal")+
+    ggtitle("Correlation Heatmap:Stepwise (+outliers) ")+
+    labs(caption = "**showing correlations > 0.7")+
+    guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                                 title.position = "top", title.hjust = 0.5))
+  print(ggheatmap2)
+  #ggsave("Heatmap.png", width = 10, height = 10, units = "in")
+  } #Visualize Correlations
+```
+
+
+# Best Subset Model Selection with Outliers
+
+```{r Best Subset Model Selection, message=FALSE, warning=FALSE}
+library(leaps)
+best_subset_model <- regsubsets(SRate_trans~., data=df_numeric, nvmax = 100)
+best_subset_summary <- summary(best_subset_model)
+{# Set up a 2x2 grid so we can look at 4 plots at once
+par(mfrow = c(2,2))
+plot(best_subset_summary$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+plot(best_subset_summary$adjr2, xlab = "Number of Variables", ylab = "Adjusted RSq", type = "l")
+
+# We will now plot a red dot to indicate the model with the largest adjusted R^2 statistic.
+# The which.max() function can be used to identify the location of the maximum point of a vector
+adj_r2_max = which.max(best_subset_summary$adjr2) # 11
+
+# The points() command works like the plot() command, except that it puts points 
+# on a plot that has already been created instead of creating a new plot
+points(adj_r2_max, best_subset_summary$adjr2[adj_r2_max], col ="red", cex = 2, pch = 20)
+
+# We'll do the same for C_p and BIC, this time looking for the models with the SMALLEST statistic
+plot(best_subset_summary$cp, xlab = "Number of Variables", ylab = "Cp", type = "l")
+cp_min = which.min(best_subset_summary$cp) # 10
+points(cp_min, best_subset_summary$cp[cp_min], col = "red", cex = 2, pch = 20)
+
+plot(best_subset_summary$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+bic_min = which.min(best_subset_summary$bic) # 6
+points(bic_min, best_subset_summary$bic[bic_min], col = "red", cex = 2, pch = 20)}
+
+best_BIC<-which.min(best_subset_summary$bic)
+
+coef(best_subset_model, best_BIC)
+names<- names(coef(best_subset_model, best_BIC))[-1]
+
+subset_data<- df_numeric %>% dplyr::select(c(SRate_trans,names))
+
+best_subset_model <- lm(SRate_trans ~ ., data= subset_data)
+
+tab_model(best_subset_model, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(best_subset_model, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+# coef_plot$sign <-c("Negative")
+# coef_plot$sign <- coef_plot %>% filter(estimate > 0)
+# coef_plot %>% mutate(test = ifelse(estimate < 0, "Negative", "Positive"))
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_best_subset_model<- coef_plot %>% 
+  dplyr::filter(p.value<=.05) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: Best Subset (+outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_best_subset_model
+
+#subplot(coef_plot_best_subset_model, coef_plot_stepwise_model, shareX = TRUE, shareY = TRUE)
+```
+
+```{r Variance Inflation Calculation for Best Subset Model}
+library(car)
+autocor <- vif(best_subset_model)
+
+#names(autocor)
+autocor <- data.frame(names(autocor), autocor)
+names(autocor) <-c("Variable", "VIF")
+rownames(autocor) <- c()
+
+autocor<-autocor %>% 
+  dplyr::arrange(desc(VIF)) 
+
+vars_to_examine <- autocor %>% filter(VIF>5)
+df_autocor <- df_numeric %>% dplyr::select(vars_to_examine$Variable)
+
+autocor
+```
+
+```{r Correlation Matrix for Best Subset Model, echo=FALSE}
+  library(reshape2)
+    library(ggplot2)  
+  cormat <- round(cor(df_autocor),2)
+  #Remove 1/2 of the correlations
+  # Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+  }
+  # Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+
+    reorder_cormat <- function(cormat){
+    # Use correlation between variables as distance
+    dd <- as.dist((1-cormat)/2)
+    hc <- hclust(dd)
+    cormat <-cormat[hc$order, hc$order]
+  }
+  
+  # Reorder the correlation matrix
+  cormat <- reorder_cormat(cormat)
+  lower_tri <- get_lower_tri(cormat)
+  # Melt the correlation matrix
+  melted_cormat <- melt(lower_tri, na.rm = TRUE)
+  melted_cormat<- melted_cormat %>% filter(Var1 != Var2) 
+  melted_cormat<- melted_cormat %>% filter(abs(value)>0.7)
+  
+  {library(ggplot2)
+  ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+    geom_tile(color = "white")+
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                         midpoint = 0, limit = c(-1,1), space = "Lab", 
+                         name="Pearson\nCorrelation") +
+    theme_minimal()+ # minimal theme
+    theme(axis.text.x = element_text(angle = 45, vjust = 0,size = 12, hjust = 0))+
+    scale_x_discrete(position = "top")+
+    coord_fixed()
+  # Print the heatmap
+
+  
+  ggheatmap2<- ggheatmap + 
+    geom_text(aes(Var2, Var1, label = value), color = "black", size = 2) +
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      #panel.grid.major = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      axis.ticks = element_blank(),
+      legend.justification = c(1, 0),
+      legend.position = c(1, 0),
+      legend.direction = "horizontal")+
+    ggtitle("Correlation Heatmap: Best Subset (+outliers) ")+
+    labs(caption = "**showing correlations > 0.7")+
+    guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                                 title.position = "top", title.hjust = 0.5))
+  print(ggheatmap2)
+  #ggsave("Heatmap.png", width = 10, height = 10, units = "in")
+  } #Visualize Correlations
+```
+
+# Outlier Removal
+
+```{r Outlier Removal}
+library(mvoutlier)
+###Removal of Outliers from the entire dataset
+df_numeric_distances <- dd.plot(df_numeric, quan=3/4, alpha=0.025, sub="Robust Outliers in Entire Dataset" )
+table(df_numeric_distances$outliers)
+df_numeric$outlier <- df_numeric_distances$outliers
+df_numeric_no_out <- df_numeric %>% dplyr::filter(outlier == FALSE) %>% dplyr::select(-outlier)
+
+###Removal of Outliers for Stepwise Dataset
+names<- names(stepwise_model$coefficients[-1])
+step_data <-df_numeric %>% dplyr::select(c(SRate_trans,names))
+step_distances <- dd.plot(step_data, quan=3/4, alpha=0.025, sub="Robust Outliers in Relevant Stepwise Columns" )
+table(step_distances$outliers)
+step_data$outlier <- step_distances$outliers
+step_data_no_out <- step_data %>% dplyr::filter(outlier == FALSE) %>% dplyr::select(-outlier)
+
+###Removal of Outliers for Best Subset Dataset
+names<- names(coef(best_subset_model, best_BIC))[-1]
+subset_data<- df_numeric %>% dplyr::select(c(SRate_trans,names))
+subset_distances <- dd.plot(subset_data, quan=3/4, alpha=0.025, sub="Robust Outliers in Relevant Best Subset Columns")
+table(subset_distances$outliers)
+subset_data$outlier <- subset_distances$outliers
+subset_data_no_out <- subset_data %>% dplyr::filter(outlier == FALSE) %>% dplyr::select(-outlier)
+```
+
+
+# Stepwise Model Selection Without Outliers
+```{r StepWise Model Selection without outliers, message=FALSE, warning=FALSE}
+#Re-running the regression with the same input variables
+stepwise_models_no_out_1 <- lm (SRate_trans~., data = step_data_no_out)
+tab_model(stepwise_models_no_out_1, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(stepwise_models_no_out_1, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+# coef_plot$sign <-c("Negative")
+# coef_plot$sign <- coef_plot %>% filter(estimate > 0)
+# coef_plot %>% mutate(test = ifelse(estimate < 0, "Negative", "Positive"))
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_stepwise_models_no_out_1<- coef_plot %>% 
+  dplyr::filter(p.value<=.05) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: Original Stepwise (-outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_stepwise_models_no_out_1
+
+#Redoing the entire stepwise process with outliers removed from the origirnal data
+full <- glm (SRate_trans~., family = gaussian, data = df_numeric_no_out)
+
+stepwise_models_no_out_2 <- stepAIC(full, trace = FALSE)
+
+print("New Stepwise model from dataset without outliers")
+tab_model(stepwise_models_no_out_2, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(stepwise_models_no_out_2, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+# coef_plot$sign <-c("Negative")
+# coef_plot$sign <- coef_plot %>% filter(estimate > 0)
+# coef_plot %>% mutate(test = ifelse(estimate < 0, "Negative", "Positive"))
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_stepwise_models_no_out_2<- coef_plot %>% 
+  dplyr::filter(p.value<=.05) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: New Stepwise model from entire dataset (-outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_stepwise_models_no_out_2
+```
+
+```{r Variance Inflation Calculation for STEP Model without outliers}
+library(car)
+autocor <- vif(stepwise_models_no_out_1)
+
+#names(autocor)
+autocor <- data.frame(names(autocor), autocor)
+names(autocor) <-c("Variable", "VIF")
+rownames(autocor) <- c()
+
+autocor<-autocor %>% 
+  dplyr::arrange(desc(VIF)) 
+
+vars_to_examine <- autocor %>% filter(VIF>5)
+df_autocor <- df_numeric %>% dplyr::select(vars_to_examine$Variable)
+
+autocor
+```
+
+```{r Correlation Matrix for STEP Model without outliers, echo=FALSE}
+  library(reshape2)
+    library(ggplot2)  
+  cormat <- round(cor(df_autocor),2)
+  #Remove 1/2 of the correlations
+  # Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+  }
+  # Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+
+    reorder_cormat <- function(cormat){
+    # Use correlation between variables as distance
+    dd <- as.dist((1-cormat)/2)
+    hc <- hclust(dd)
+    cormat <-cormat[hc$order, hc$order]
+  }
+  
+  # Reorder the correlation matrix
+  cormat <- reorder_cormat(cormat)
+  lower_tri <- get_lower_tri(cormat)
+  # Melt the correlation matrix
+  melted_cormat <- melt(lower_tri, na.rm = TRUE)
+  melted_cormat<- melted_cormat %>% filter(Var1 != Var2) 
+  melted_cormat<- melted_cormat %>% filter(abs(value)>0.7)
+  
+  {library(ggplot2)
+  ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+    geom_tile(color = "white")+
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                         midpoint = 0, limit = c(-1,1), space = "Lab", 
+                         name="Pearson\nCorrelation") +
+    theme_minimal()+ # minimal theme
+    theme(axis.text.x = element_text(angle = 45, vjust = 0,size = 12, hjust = 0))+
+    scale_x_discrete(position = "top")+
+    coord_fixed()
+  # Print the heatmap
+
+  
+  ggheatmap2<- ggheatmap + 
+    geom_text(aes(Var2, Var1, label = value), color = "black", size = 2) +
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      #panel.grid.major = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      axis.ticks = element_blank(),
+      legend.justification = c(1, 0),
+      legend.position = c(1, 0),
+      legend.direction = "horizontal")+
+    ggtitle("Correlation Heatmap: New Stepwise model from \n entire dataset (-outliers) ")+
+    labs(caption = "**showing correlations > 0.7")+
+    guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                                 title.position = "top", title.hjust = 0.5))
+  print(ggheatmap2)
+  #ggsave("Heatmap.png", width = 10, height = 10, units = "in")
+  } #Visualize Correlations
+```
+
+
+# Best Subset Model Selection without Outliers
+```{r Best Subset Model Selection without outliers, message=FALSE, warning=FALSE}
+library(leaps)
+best_subset_model_no_out_1 <- lm(SRate_trans ~., data= subset_data_no_out)
+tab_model(best_subset_model_no_out_1, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(best_subset_model_no_out_1, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-(coef_plot$std.error)), decreasing = TRUE)])
+
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_best_subset_model_no_out_1<- coef_plot %>% 
+  dplyr::filter(p.value<=.05) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: Original Best Subset (-outliers) ', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_best_subset_model_no_out_1
+
+print("New Best Subset model from entire dataset without outliers")
+best_subset_model_no_out_2 <- regsubsets(SRate_trans~., data=df_numeric_no_out, nvmax = 100)
+best_subset_model_no_out_2_summary <- summary(best_subset_model_no_out_2)
+{# Set up a 2x2 grid so we can look at 4 plots at once
+par(mfrow = c(2,2))
+plot(best_subset_model_no_out_2_summary$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+plot(best_subset_model_no_out_2_summary$adjr2, xlab = "Number of Variables", ylab = "Adjusted RSq", type = "l")
+
+# We will now plot a red dot to indicate the model with the largest adjusted R^2 statistic.
+# The which.max() function can be used to identify the location of the maximum point of a vector
+adj_r2_max = which.max(best_subset_model_no_out_2_summary$adjr2) # 11
+
+# The points() command works like the plot() command, except that it puts points 
+# on a plot that has already been created instead of creating a new plot
+points(adj_r2_max, best_subset_model_no_out_2_summary$adjr2[adj_r2_max], col ="red", cex = 2, pch = 20)
+
+# We'll do the same for C_p and BIC, this time looking for the models with the SMALLEST statistic
+plot(best_subset_model_no_out_2_summary$cp, xlab = "Number of Variables", ylab = "Cp", type = "l")
+cp_min = which.min(best_subset_model_no_out_2_summary$cp) # 10
+points(cp_min, best_subset_model_no_out_2_summary$cp[cp_min], col = "red", cex = 2, pch = 20)
+
+plot(best_subset_model_no_out_2_summary$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+bic_min = which.min(best_subset_model_no_out_2_summary$bic) # 6
+points(bic_min, best_subset_model_no_out_2_summary$bic[bic_min], col = "red", cex = 2, pch = 20)}
+
+best_BIC<-which.min(best_subset_model_no_out_2_summary$bic)
+
+coef(best_subset_model_no_out_2, best_BIC)
+names<- names(coef(best_subset_model_no_out_2, best_BIC))[-1]
+
+subset_data_no_out_2<- df_numeric_no_out %>% dplyr::select(c(SRate_trans,names))
+
+best_subset_model_no_out_2 <- lm(SRate_trans ~ ., data= subset_data_no_out_2)
+
+tab_model(best_subset_model_no_out_2, show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+
+
+library(plotly)
+library(dplyr)
+
+{
+  coef_plot <- plot_model(best_subset_model_no_out_2, title = "Model 1: Scaled Estimates", type ="std" ,sort.est = FALSE, show.values = TRUE, digits =3, value.offset = 0.5, p.threshold = c(0.05, 0.01, 0.001))
+
+
+coef_plot<-coef_plot$data
+
+coef_plot$term <- factor(coef_plot$term, levels = unique(coef_plot$term)[order((abs(coef_plot$estimate)-abs(coef_plot$std.error)), decreasing = TRUE)])
+
+coef_plot$group <- as.factor(coef_plot$group)
+
+coef_plot_best_subset_model_no_out_2<- coef_plot %>% 
+  dplyr::filter(p.value<=.05) %>%
+    plot_ly(type = "bar", 
+            error_y = ~list(array = round(std.error, 2),
+                            color = '#000000'),
+            x=~term, 
+            y=~abs(round(estimate, 2)), 
+            color = ~group, 
+            textinfo = "label", 
+            colors = c("blue", "red" ), 
+            showlegend= TRUE)  %>% 
+  layout(title = 'Standardized Model Estimates: New Best Subset model from entire dataset (-outliers)', 
+         yaxis = list(title = 'abs(Standardized Estimate)'),  
+         xaxis = list(title = 'Model Variable'),
+         legend=list(title=list(text='<b> Coef. Sign </b>')))
+}
+
+coef_plot_best_subset_model_no_out_2
+```
+
+```{r Variance Inflation Calculation for Best Subset Model without outliers}
+library(car)
+autocor <- vif(best_subset_model_no_out_2)
+
+#names(autocor)
+autocor <- data.frame(names(autocor), autocor)
+names(autocor) <-c("Variable", "VIF")
+rownames(autocor) <- c()
+
+autocor<-autocor %>% 
+  dplyr::arrange(desc(VIF)) 
+
+vars_to_examine <- autocor %>% filter(VIF>5)
+df_autocor <- df_numeric %>% dplyr::select(vars_to_examine$Variable)
+
+autocor
+```
+
+```{r Correlation Matrix for Best Subset Model without outliers, echo=FALSE, fig.height=6, fig.width=6}
+  library(reshape2)
+    library(ggplot2)  
+  cormat <- round(cor(df_autocor),2)
+  #Remove 1/2 of the correlations
+  # Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+  }
+  # Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+
+    reorder_cormat <- function(cormat){
+    # Use correlation between variables as distance
+    dd <- as.dist((1-cormat)/2)
+    hc <- hclust(dd)
+    cormat <-cormat[hc$order, hc$order]
+  }
+  
+  # Reorder the correlation matrix
+  cormat <- reorder_cormat(cormat)
+  lower_tri <- get_lower_tri(cormat)
+  # Melt the correlation matrix
+  melted_cormat <- melt(lower_tri, na.rm = TRUE)
+  melted_cormat<- melted_cormat %>% filter(Var1 != Var2) 
+  melted_cormat<- melted_cormat %>% filter(abs(value)>0.5)
+  
+  {library(ggplot2)
+  ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+    geom_tile(color = "white")+
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                         midpoint = 0, limit = c(-1,1), space = "Lab", 
+                         name="Pearson\nCorrelation") +
+    theme_minimal()+ # minimal theme
+    theme(axis.text.x = element_text(angle = 45, vjust = 0,size = 12, hjust = 0))+
+    scale_x_discrete(position = "top")+
+    coord_fixed()
+  # Print the heatmap
+
+  
+  ggheatmap2<- ggheatmap + 
+    geom_text(aes(Var2, Var1, label = value), color = "black", size = 2) +
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      #panel.grid.major = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      axis.ticks = element_blank(),
+      legend.justification = c(1, 0),
+      legend.position = c(1, 0),
+      legend.direction = "horizontal")+
+    ggtitle("Correlation Heatmap: New Best Subset model \nfrom entire dataset (-outliers)")+
+    labs(caption = "**showing correlations > (+-) 0.5")+
+    guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                                 title.position = "top", title.hjust = 0.5))
+  ggheatmap2
+  #ggsave("Heatmap.png", width = 10, height = 10, units = "in")
+  } #Visualize Correlations
+```
+
+# Comparing Model Coefficients
+```{r tab comparisons}
+tab_model(stepwise_model, 
+          stepwise_models_no_out_1, 
+          stepwise_models_no_out_2, 
+          dv.labels = c("Stepwise Model 1", "Stepwise Model 1 w/o outliers", "Stepwise Model 2 w/o outliers"),
+          show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+ # pred.labels = c("Intercept", "Age (Carer)", "Hours per Week", "Gender (Carer)",
+ #                  "Education: middle (Carer)", "Education: high (Carer)", 
+ #                  "Age (Older Person)"),
+
+
+tab_model(best_subset_model, 
+          best_subset_model_no_out_1, 
+          best_subset_model_no_out_2, 
+          dv.labels = c("Best Subset Model 1", "Best Subset Model 1 w/o outliers", "Best Subset Model 2 w/o outliers"),
+          show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE)
+
+```
+
+# Removing Colinear Predictor Variables 
+```{r removing colinear terms, message=FALSE, warning=FALSE}
+###Outliers
+#Stepwise Model
+step1 <- update(stepwise_model, .~. -Ru1, data=df_numeric)
+step2 <- update(stepwise_model, .~. -Ru1 -TWL_Chng, data=df_numeric)
+step3 <- update(stepwise_model, .~. -Ru1 -TWL_Chng -logit_WE_onshr1, data=df_numeric)
+step4 <- update(stepwise_model, .~. -TWL1 -TWL_Chng -logit_WE_onshr1,  data=df_numeric)
+step5 <- update(stepwise_model, .~. -TWL1 -TWL_Chng -logit_WE_onshr1 -Ru1, data=df_numeric)
+
+tab_model(stepwise_model,
+          step1,
+          step2,
+          step3,
+          step4,
+          step5,
+          show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE,
+          dv.labels = c("Original Stepwise Model",
+                        "-Ru1",
+                        "-Ru1 -TWL_Chng",
+                        "-Ru1 -TWL_Chng -logit_WE_onshr1",
+                        "-TWL1 -TWL_Chng -logit_WE_onshr1",
+                        "-TWL1 -TWL_Chng -logit_WE_onshr1 -Ru1"
+                        ),
+          title = "Stepwise Model Comparison: Removing Multicolinearity")
+
+subset1 <- update(best_subset_model, .~. -Ru1, data=df_numeric)
+subset2 <- update(best_subset_model, .~. -Ru1 -TWL_Chng, data=df_numeric)
+subset3 <- update(best_subset_model, .~. -Ru1 -TWL_Chng -logit_WE_onshr1, data=df_numeric)
+subset4 <- update(best_subset_model, .~. -TWL1 -TWL_Chng -logit_WE_onshr1,  data=df_numeric)
+subset5 <- update(best_subset_model, .~. -TWL1 -TWL_Chng -logit_WE_onshr1 -Ru1, data=df_numeric)
+
+tab_model(best_subset_model,
+          subset1,
+          subset2,
+          subset3,
+          subset4,
+          subset5,
+          show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE,
+          dv.labels = c("Original Best Subset Model",
+                        "-Ru1",
+                        "-Ru1 -TWL_Chng",
+                        "-Ru1 -TWL_Chng -logit_WE_onshr1",
+                        "-TWL1 -TWL_Chng -logit_WE_onshr1",
+                        "-TWL1 -TWL_Chng -logit_WE_onshr1 -Ru1"
+                        ),
+          title = "Best Subset Model Comparison: Removing Multicolinearity")
+
+###No Outliers
+
+subset1_no_out_1 <- update(best_subset_model_no_out_1, .~ . -TWL_Chng, data=subset_data_no_out)
+subset2_no_out_1 <- update(best_subset_model_no_out_1, .~ . -TWL_Chng -Ru1, data=subset_data_no_out)
+subset3_no_out_1 <- update(best_subset_model_no_out_1, .~ . -TWL_Chng -Ru1 -logit_WE_onshr1, data=subset_data_no_out)
+subset4_no_out_1 <- update(best_subset_model_no_out_1, .~ . -TWL_Chng -Ru1 -logit_WE_onshr2, data=subset_data_no_out)
+subset5_no_out_1 <- update(best_subset_model_no_out_1, .~ . -TWL_Chng -logit_WE_onshr1 -WEin1 -TWL1 -ZS1, data=subset_data_no_out)
+
+tab_model(best_subset_model_no_out_1,
+          subset1_no_out_1,
+          subset2_no_out_1,
+          subset3_no_out_1,
+          subset4_no_out_1,
+          subset5_no_out_1,
+          show.est = FALSE,
+          show.std = TRUE,
+          show.aicc = TRUE,
+          show.ci = FALSE,
+          dv.labels = c("Original Best Subset Model",
+                        "-TWL_Chng",
+                        "-TWL_Chng -Ru1",
+                        "-TWL_Chng -Ru1 -logit_WE_onshr1",
+                        "-TWL_Chng -Ru1 -logit_WE_onshr2",
+                        "-TWL_Chng -TWL1 -logit_WE_onshr1 -ZS1"
+                        ),
+          title = "Best Subset Model Comparison (No Outlier): Removing Multicolinearity")
+
+# library(car)
+# autocor <- vif(subset5_no_out_1)
+# autocor %>% sort(decreasing = TRUE)
+# n=2
+# vif(get(paste0("subset", n,"_no_out_1")))
+# 
+# for(i in 1:5) {                 # Head of for-loop
+#   output <- rep(i, 5)           # Output of iteration i
+#   my_list[[i]] <- output        # Store output in list
+# }
+```
+
+
+# Net Elastic Model Development
+
+```{r Net Elastic Model}
+
+######## Create Training and Test data
+library(caret)
+
+#Set Seed
+set.seed(1992)
+
+
+#Create index matrix and assign 80% of the rows to it
+index <- createDataPartition(df_numeric$SRate_trans, p=0.8, list = FALSE, times = 1) #80% split, give me a matrix, split only once
+
+#Create training and testing dataframes
+train_df <- df_numeric %>% dplyr::select(-outlier) %>% .[index, ]
+test_df <- df_numeric %>% dplyr::select(-outlier) %>% .[-index, ]
+
+#### k-fold cross-validation (10 fold)
+
+ctrlspecs <- trainControl(method="cv", number=10, savePredictions = "all")
+
+
+#### Train Regression Model
+
+#Create lamda vector
+lambda_vector <- 10^seq(5,-5, length = 200)
+alpha_vector <- seq(0,1, length= 11)
+#alpha_vector <- 1
+
+library(glmnet)
+#set seed
+set.seed(1992)
+
+#Specify regression model
+model1 <- train(SRate_trans ~ ., 
+                data= train_df,
+                preProcess=c("center", "scale"),
+                method="glmnet",
+                tuneGrid=expand.grid(alpha=alpha_vector, lambda=lambda_vector),
+                trControl=ctrlspecs,
+                na.action=na.omit)
+
+# model2 <- train(SRate_trans ~ ., 
+#                 data= train_df,
+#                 preProcess="BoxCox",
+#                 method="glmnet",
+#                 tuneGrid=expand.grid(alpha=alpha_vector, lambda=lambda_vector),
+#                 trControl=ctrlspecs,
+#                 na.action=na.omit)
+```
+
+```{r Plot Net Elastic Results}
+# Optimal Tuning Parameter
+plot(model1$results)
+model1$bestTune$alpha
+best_alpha<-model1$bestTune$alpha
+
+model1$bestTune$lambda
+best_lambda <- model1$bestTune$lambda
+
+#Best Model results
+model1$results[as.integer(rownames(model1$bestTune)), ]
+mod1perf_train <-data.frame(RMSE= model1$results[as.integer(rownames(model1$bestTune)), ][3],
+                         Rsquared=model1$results[as.integer(rownames(model1$bestTune)), ][4])
+
+# Regression coefficients
+round(coef(model1$finalModel, model1$bestTune$lambda), 3)
+
+#RMSE
+
+ggplot(data=model1$results, aes(x=log10(lambda), y=RMSE, color = as.factor(alpha)))+
+  geom_point()+
+  scale_color_viridis_d("Alpha")+
+  xlab("log(lambda)")+
+  ylab("RMSE")+
+  xlim(c(-3.5, 2))
+
+#R^2
+ggplot(data=model1$results, aes(x=log10(lambda), y=Rsquared, color = as.factor(alpha)))+
+  geom_point()+
+  scale_color_viridis_d("Alpha")+
+  xlab("log(lambda)")+
+  ylab("Rsquared")+
+  xlim(c(-4.5, 0))
+
+#Variable Importance
+var_imp <- varImp(model1$finalModel)
+library(tibble)
+var_imp<-rownames_to_column(var_imp)
+var_imp$round <- round(var_imp$Overall, 3)
+var_imp %>% dplyr::arrange(-Overall)
+
+#Plot Variable Importance
+ggplot(varImp(model1))
+
+
+```
+
+# BoxCox Transformation
+
+```{r BoxCox}
+library(MASS)
+##PRe-transformation
+{plot(fitted(subset1), resid(subset1), col = "dodgerblue",
+     pch = 20, cex = 1.5, xlab = "Fitted", ylab = "Residuals")
+abline(h = 0, lty = 2, col = "darkorange", lwd = 2)}
+
+
+
+best_boxcox_val<- boxcox(subset1, plotit = TRUE, lambda = seq(0, .5, by = 0.1))
+best_boxcox_val<- as.data.frame(best_boxcox_val)
+best_boxcox_val<- best_boxcox_val %>% dplyr::filter(y==max(best_boxcox_val$y)) %>% .$x
+
+#update with new transformationRu1
+test <- update(subset1, (((SRate_trans ^ best_boxcox_val) - 1) / best_boxcox_val)~. , data=df_numeric)
+
+{plot(fitted(test), resid(test), col = "dodgerblue",
+     pch = 20, cex = 1.5, xlab = "Fitted", ylab = "Residuals")
+abline(h = 0, lty = 2, col = "darkorange", lwd = 2)}
+
+
+#testing some things
+test<-lm(SRate_trans ~ Ru1, data= train_df)
+
+{par(mfrow = c(1, 2))
+plot(SRate_trans ~ Ru1, data=train_df)
+plot(fitted(test), resid(test), xlab = "Fitted", ylab = "Residuals", 
+     col = "dodgerblue", pch = 20, cex = 2)
+  abline(h = 0, col = "darkorange", lwd = 2)
+}
+
+best_boxcox_val<- boxcox(test, plotit = TRUE, lambda = seq(0, .5, by = 0.1))
+best_boxcox_val<- as.data.frame(best_boxcox_val)
+best_boxcox_val<- best_boxcox_val %>% dplyr::filter(y==max(best_boxcox_val$y)) %>% .$x
+
+test <- update(test, (((SRate_trans ^ best_boxcox_val) - 1) / best_boxcox_val)~. , data=train_df)
+
+{par(mfrow = c(1, 2))
+plot(SRate_trans ~ Ru1, data=train_df)
+plot(fitted(test), resid(test), xlab = "Fitted", ylab = "Residuals", 
+     col = "dodgerblue", pch = 20, cex = 2)
+  abline(h = 0, col = "darkorange", lwd = 2)
+}
+
+
+```

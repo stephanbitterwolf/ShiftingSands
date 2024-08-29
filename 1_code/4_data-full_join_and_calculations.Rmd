@@ -1,0 +1,402 @@
+---
+title: "Hawaii_Reefs_and_Erosion"
+author: "Stephan Bitterwolf"
+date: "5/2/2023"
+output:
+    html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r Setup Knitr Options, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning = FALSE)
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 100px;
+}
+
+.btn {
+    border-width: 0px 0px 0px;
+    font-weight: normal;
+    text-transform: ;
+}
+.btn-default {
+    color: #2ecc71;
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+
+
+.header-section-number::after {
+  content: ".";
+}
+```
+
+# About this Code
+
+
+
+```{r load packages, echo=TRUE}
+library(sjmisc) #https://rdrr.io/cran/sjmisc/man/move_columns.html
+library(sf)
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(ggspatial)
+
+library(ggnewscale)
+library(tibble)
+library(ggpubr) #https://rpkgs.datanovia.com/ggpubr/index.html
+library(ggridges) #https://www.datanovia.com/en/blog/elegant-visualization-of-density-distribution-in-r-using-ridgeline/
+library(foreign)
+library(here)
+
+```
+# About this Code
+
+Here I am joining the erosion values to the reef transects. This requires some transformation of the erosion values by clipping them to the shore.
+
+
+**Importing Data**
+
+```{r Import Shapefiles, echo=TRUE}
+
+
+Coasts <- st_read(here("0_data", "coast", "HawaiiLandEditedByBitterwolf.shp")) #This coast data is from the Hawaii Habitat files and was modified by Stephan Bitterwolf to remove island and artificial structures as well as correct any small coastline issues impacting reef transects and erosion points. The original maps can be found at this link: https://cdn.coastalscience.noaa.gov/datasets/e97/2007/shapes_benthic/Habitat_GIS_Data.zip
+
+#Reefs <- st_read(here("2_output", "modified_shapefiles","reefs", "reefs_merged.gpkg")) 
+Erosion <- st_read(here("2_output", "modified_shapefiles","erosion", "erosion_merged_extended.gpkg")) 
+Erosion<- st_set_crs(Erosion, 32604)
+Transects <- st_read(here("2_output", "modified_shapefiles","transects", "transects_final.gpkg")) 
+Seafloor <-read.csv(here("0_data", "seafloor","Maui_ElevationChange.csv"))
+
+#convert yates to sf
+Seafloor <- st_as_sf(Seafloor, coords = c("Longitude..UTM.NAD83.", "Latitude..UTM.NAD83."), crs = 26904)
+
+#rename yates columns (UTM columns were used above and thus are absent here)
+colnames(Seafloor)<- c("HSHEET",	"YEAR",	"Longitude_Geographic", "Latitude_Geographic", "Historical_sounding_MLLW",	"LiDAR_elevation_MLLW",	"Difference", "geometry")
+#Transform seafloor CRS to match that of Reefs
+Seafloor <- st_transform(Seafloor, crs = st_crs(Transects))
+
+#Check that the projections (CRS) are the same for all data
+#st_crs(Coasts) == st_crs(Reefs)
+st_crs(Coasts) == st_crs(Erosion)
+st_crs(Coasts) == st_crs(Transects)
+st_crs(Coasts) == st_crs(Seafloor)
+
+#Add rownames of each spatial dataset to a column
+#Reefs <- rownames_to_column(Reefs, "Reefs_ID")
+Erosion <- rownames_to_column(Erosion, "Erosion_ID")
+# Transects <- rownames_to_column(Transects, "Transects_ID")
+Seafloor <- rownames_to_column(Seafloor, "Seafloor_ID")
+Coasts <- rownames_to_column(Coasts, "Coast_ID")
+```
+
+
+**Spatially Joining Transect, Erosion, and Reef Datasets**
+With the trimmed transects, we can use them to find Erosion and Reef datapoints that intercept the same piece of coastline. To do this we will use tools within the sf package. First we will plot the data for a small section of coastline. Then we will transform erosion lines into points. Then we will buffer the transects to increase their width to 50 m (since the transects are spaced 50m apart this will result in the entire coastline being covered). Then we will join erosion datapoints to transects. Finally, we will join the erosion+transect shapes to the reef dataset.
+
+```{r Spatial Joins: Erosion}
+
+#Plotting Erosion Data, Reef Data, and Transects
+bbox <- st_bbox(st_geometry(Transects)[3380:3397])
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Erosion, color="red")+
+  #geom_sf(data = Reefs, color = "blue")+
+  geom_sf(data = Transects[3380:3400,], size = 1)+
+  
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2]-200, bbox[4]-7000)+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Erosion and Reef Transects")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+
+This plot shows the erosion data in red, reef data in blue, and reef transects as the black lines. The blue points don't always touch the coast where they should. We will fix this later.
+
+```{r Spatial Joins: Erosion 2}
+#Converting Erosion Lines to Points that Intersect the Coast
+#Here we follow the same approach as for the reef transect trimming coding file #3
+Erosion_Trimmed <- st_difference(Erosion, st_union(st_geometry(Coasts)))
+```
+
+```{r Spatial Joins: Erosion 3}
+
+bbox <- st_bbox(st_geometry(Erosion_Trimmed)[5840:5860])
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Erosion_Trimmed, color="red")+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Trimmed Erosion Transects")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+Above we see the erosion transects that have been split by the coastline. Below we will select the portions touching the offshore ends of each transect. The method was also externally validated with QGIS.
+```{r Spatial Joins: Erosion 4}
+Erosion_Linestrings <- st_cast(st_cast(Erosion_Trimmed, "MULTILINESTRING"),"LINESTRING")
+Erosion_Ends <- st_cast(st_cast(Erosion, "MULTILINESTRING"),"LINESTRING")
+Erosion_Ends <- st_line_sample(st_as_sf(Erosion_Ends), sample = 0)
+
+start<-5921
+end<-start+25
+
+bbox <- st_bbox(st_geometry(Erosion_Linestrings)[start:end])
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Erosion_Linestrings[start:end,], aes(color = as.factor(row.names(Erosion_Linestrings)[start:end])))+
+  geom_sf(data = Erosion_Ends, color="red")+
+  scale_color_manual(values=c("#89C5DA", "#DA5724", "#74D944", "#CE50CA", "#3F4921", "#C0717C", "#CBD588", "#5F7FC7","#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030", "#AD6F3B", "#CD9BCD","#D14285", "#6DDE88", "#652926", "#7FDCC0", "#C84248", "#8569D5", "#5E738F", "#D1A33D","#8A7C64", "#599861"))+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Selecting Correct Transect Portions")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none")+
+  annotation_scale(location = "br", width_hint = 0.2) +
+  annotation_north_arrow(location = "br", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+
+```{r Spatial Joins: Erosion 5}
+#Keep Only Erosion Transects that touch Erosion_Ends
+Erosion_Final <- Erosion_Linestrings %>% st_filter(Erosion_Ends, .predicate = st_touches)
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Erosion_Linestrings[5885:5910,], aes(color = as.factor(row.names(Erosion_Linestrings)[5885:5910])))+
+  geom_sf(data = Erosion_Ends, color="red")+
+  geom_sf(data = Erosion_Final, color="blue")+
+  scale_color_manual(values=c("#89C5DA", "#DA5724", "#74D944", "#CE50CA", "#3F4921", "#C0717C", "#CBD588", "#5F7FC7","#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030", "#AD6F3B", "#CD9BCD","#D14285", "#6DDE88", "#652926", "#7FDCC0", "#C84248", "#8569D5", "#5E738F", "#D1A33D","#8A7C64", "#599861"))+
+  
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Trimmed Erosion Transects")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none")+
+  annotation_scale(location = "br", width_hint = 0.2) +
+  annotation_north_arrow(location = "br", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+```
+
+Now I will create points on the shore where the erosion transect intersects. These points will be used for determining which erosion value goes into which reef transect
+```{r Spatial Joins: Erosion 6}
+#Get Points of Erosion Clipping to Shore
+Erosion_Points <-st_line_sample(Erosion_Final, sample = 1)
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Erosion_Final, color="black")+
+  geom_sf(data = Erosion_Ends, color="red")+
+  geom_sf(data = Erosion_Points, color="blue")+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Erosion Shoreline Points")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "none")+
+  annotation_scale(location = "br", width_hint = 0.2) +
+  annotation_north_arrow(location = "br", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+#Get Erosion Data via a spatial join
+Erosion_Points<-st_as_sf(Erosion_Points)
+Erosion_Points<-st_join(Erosion_Points, Erosion_Trimmed, join = st_touches)
+Erosion_Points<-st_cast(Erosion_Points, "POINT")
+st_write(Erosion_Points, paste(here("2_output","modified_shapefiles","erosion"),"/erosion_points.gpkg", sep=""),delete_layer = TRUE) 
+```
+
+```{r Spatial Joins: Erosion and Transects}
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Erosion_Points, color="red")+
+  #geom_sf(data = Reefs, color = "blue")+
+  geom_sf(data = Transects, size = 1)+
+  geom_sf(data = Erosion_Final, color="green")+
+  
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Erosion and Reef Transects")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+#Extend transects 100m inland to capture any erosion points clipping further inland
+Extended_Transects<-qgis::qgis_extendlines(Transects, START_DISTANCE = 100)%>% st_as_sf()
+
+#Join Erosion and Transects
+Joined_Transects <- st_join(st_buffer(Extended_Transects, 49), Erosion_Points, join = st_intersects) #Buffer those extended transects to capture erosion points 49m on either side
+
+Joined_Transects <- Joined_Transects %>% filter(!is.na(SRate_m)) #Remove Transects that did not overlap with Erosion data
+
+#Count number of Erosion points retained
+E.total <- length(na.omit(Joined_Transects$Erosion_ID)) #Total number of points (including points counted more than once)
+E.unique <- length(unique(na.omit(Joined_Transects$Erosion_ID))) #Total number of unique erosion points (regardless of how many times counted)
+
+#Count number of Transects that intersected Erosion points
+t.unique <- length(unique(na.omit(Joined_Transects$trns_ID))) #Total number of unique Transects 
+
+paste(E.total, " erosion datapoints mapped to ", t.unique," transects. Of these, ", E.unique, " mapped uniquely and ", E.total-E.unique, " mapped multiple times", sep="")
+
+print(paste("The following Erosion_ID mapped to more than 1 transect: ", (Joined_Transects$Erosion_ID[duplicated(na.omit(Joined_Transects$Erosion_ID))==TRUE]), sep=""))
+
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Joined_Transects, aes(fill=SRate_m))+
+  #geom_sf(data = Reefs, color= "Blue")+
+  geom_sf(data = Erosion_Points, color= "red")+
+  
+  scale_fill_viridis_c()+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Erosion Data Is Joined to Transects")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "tl", width_hint = 0.2) +
+  annotation_north_arrow(location = "tl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+st_write(Joined_Transects,"temp-Erosion_Joined.gpkg", delete_layer = TRUE)
+```
+
+*Erosion and Reef Transect Joining Stats*
+In total there were 12,309 erosion points. Of these, "r E.unique" were within 50 m of a reef transect. Not all reef transects intersected erosion points. Out of the 5459 reef transects, "r t.unique" contained erosion points. This is to be expected as some reef transects do not intersect sandy beaches. They can also intersect rocky coasts. 
+
+
+
+```{r Spatial Joins: Seafloor and Transects, eval=FALSE, include=FALSE}
+#Join Seafloor and Transects
+Joined_Transects_2 <- st_join(st_buffer(Transects, 49), Seafloor, join = st_intersects)
+Joined_Transects_2 <- na.omit(Joined_Transects_2) #remove transects that did not overlap with Seafloor Change data
+
+#Count number of Seafloor points retained
+S.total <- length(na.omit(Joined_Transects_2$Seafloor_ID)) #Total number of points (including points counted more than once)
+S.unique <- length(unique(na.omit(Joined_Transects_2$Seafloor_ID))) #Total number of unique erosion points (regardless of how many times counted)
+#Count number of Transects that intersected Erosion points
+ts.unique <- length(unique(na.omit(Joined_Transects_2$Transects_ID))) #Total number of unique Transects 
+
+paste(S.total, " seafloor datapoints mapped to ", ts.unique," transects. Of these, ", S.unique, " mapped uniquely and ", S.total-S.unique, " mapped multiple times", sep="")
+
+#print(paste("The following Erosion_ID mapped to more than 1 transect: ", (Joined_Transects_2$Seafloor_ID[duplicated(na.omit(Joined_Transects_2$Seafloor_ID))==TRUE]), sep=""))
+
+```
+
+
+Reef data can be variable in its location. Some points clip to the reef crest, islands offshore, or inland rivers. This section of code will calculate the distance between reefs and the shore. This distance can later be subset to omit outliers that may have come from an improper clip of the reef to shore.
+
+```{r Spatial Joins: Reef, echo=TRUE, warning=FALSE}
+Reefs <- st_read(here("2_output", "modified_shapefiles","reefs", "reefs_merged.gpkg")) 
+#Calculate Distances Between Reef Point and Nearest Coast
+Reef_Distances_2_Coast <- apply(st_distance(st_geometry(Reefs), st_geometry(st_union(Coasts))),1,min)
+
+#Add Distances to Reefs Dataframe
+Reefs$Reef_Distances_2_Coast <- Reef_Distances_2_Coast
+# Reefs <- move_columns(data = Reefs, Dist_2_Cst, .after = "WE_onsChg") #move column
+# Reefs <- Reefs[,-c(34:35)] #Remove new columns made by "move_columns" command
+
+Reefs<- Reefs %>%
+  select(c("reef_ID", "Reef_Distances_2_Coast"))
+
+#Join Reefs and "Joined_Transects" dataframes
+Reefs_and_Erosion <- left_join(Joined_Transects, st_drop_geometry(Reefs), by="reef_ID")
+
+#The geometry consists of bulky polygons. I will convert them back to a line geometry
+transect_lines<-Transects%>%
+  select(Transects_ID) #get the transect data and select only the ID column
+
+Reefs_and_Erosion<-right_join(transect_lines, st_drop_geometry(Reefs_and_Erosion), by="Transects_ID") #Hoin the Reefs and Erosion data (but not the geometry) to the transect line data (with the linestring geometry). This will make it so that the final Reefs_and_Erosion dataframe is an SF object with the linestring instead of polygon geometry
+
+
+Reefs_and_Erosion<-Reefs_and_Erosion%>%
+  select(-c("island.y"))%>% #remove geom artifacts from joining
+  rename(island_reef = island.x,
+         island_erosion= Island) #rename island columns so that they are not duplicated
+
+# Reefs_and_Seafloor <- st_join(Reefs, Joined_Transects_2, join=st_intersects)
+# Reefs_Erosion_Seafloor <- st_join(Reefs_and_Erosion, Joined_Transects_2, join=st_intersects )
+
+### Spatial Join Data of all three data in one map
+# Count number of Seafloor points retained
+# data<- st_drop_geometry(Reefs_Erosion_Seafloor) %>% na.omit %>% select(Reefs_ID, Ru1, Seafloor_ID, Difference, Erosion_ID, SRate_m)
+# E.unique <- length(unique(data$Erosion_ID)) #Unique Erosion points
+# E.total <- data %>% select(Reefs_ID, Erosion_ID) %>% distinct() %>% count() %>% as.numeric(.)
+# S.unique <- length(unique(data$Seafloor_ID)) #Unique Seafloor Points
+# S.total <- data %>% select(Reefs_ID, Seafloor_ID) %>% distinct() %>% count() %>% as.numeric(.)
+# Count number of Transects that intersected Erosion points
+# ts.unique <- length(unique(na.omit(Reefs_Erosion_Seafloor)$Reefs_ID)) #Unique Transects
+# 
+# paste(S.total, " seafloor and ",E.total ," Erosion datapoints mapped to ", ts.unique," transects. Of these, ", S.unique, " seafloor points mapped uniquely and ", S.total-S.unique, " seafloor points mapped multiple times. ", "For erosion data, ", E.unique, " points mapped uniquely and ", E.total-E.unique, " points mapped multiple times", sep="")
+
+
+dir.create(paste(here("2_output","modified_shapefiles"),"/joined_databases", sep=""))
+
+#Save Reefs_and_Erosion
+st_write(Reefs_and_Erosion,here("2_output","modified_shapefiles","joined_databases","reefs_and_erosion.gpkg"),delete_layer = TRUE)
+
+#Saving names will abbreviate them automatically affecting the next step of analysis. Below I create and save a column name file.
+Reefs_and_Erosion<-st_read(here("2_output","modified_shapefiles","joined_databases", "reefs_and_erosion.gpkg"))
+
+# #Save Reefs_and_Seafloor
+# st_write(Reefs_and_Seafloor,"Shapefiles/Hawaii_Merged_Databases/Reefs_and_Seafloor.gpkg", delete_layer = TRUE)
+# 
+# #Save Reefs_Erosion_Seafloor
+# st_write(Reefs_Erosion_Seafloor,"Shapefiles/Hawaii_Merged_Databases/Reefs_Erosion_Seafloor.gpkg", delete_layer = TRUE)
+
+bbox <- st_bbox(Reefs_and_Erosion[400:800, ])
+ggplot()+
+  geom_sf(data = Coasts)+
+  geom_sf(data = Joined_Transects, aes(fill=SRate_m))+
+  geom_sf(data = Reefs[1:1000, ], aes(color= Reef_Distances_2_Coast), size = 2)+
+  #geom_sf(data = Erosion_Points, color= "red")+
+  
+  scale_fill_viridis_c()+
+  xlim(bbox[1], bbox[3])+
+  ylim(bbox[2], bbox[4])+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggtitle("Erosion and Transects are Joined to Reefs")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "br", width_hint = 0.2) +
+  annotation_north_arrow(location = "br", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+```

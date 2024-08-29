@@ -1,0 +1,1 @@
+Open the R Code Folder and execute the R Script. Make sure that the 00_Merged_Data folder is empty.

@@ -1,0 +1,1 @@
+This folder contains the original datasets and modifications thereof. Modifications were accomplished with R scripts contained in their folders.

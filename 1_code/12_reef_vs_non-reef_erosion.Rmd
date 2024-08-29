@@ -1,0 +1,684 @@
+---
+title: "SRate_Anova_Tidy"
+author: "Stephan Bitterwolf"
+date: "12/13/2021"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache= TRUE, warning = FALSE, message= FALSE, echo = TRUE, dpi = 300, fig.width = 8, fig.height = 5)
+# 
+# library(ggthemes)
+# #devtools::install_github('Mikata-Project/ggthemr')
+# library(ggthemr)
+# ggthemr('fresh', layout = "minimal")
+```
+
+```{css, echo=FALSE}
+pre {
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+pre[class] {
+  max-height: 100px;
+}
+
+.btn {
+    border-width: 0px 0px 0px;
+    font-weight: normal;
+    text-transform: ;
+}
+.btn-default {
+    color: #2ecc71;
+    background-color: #ffffff;
+    border-color: #ffffff;
+}
+
+
+.header-section-number::after {
+  content: ".";
+}
+```
+
+```{r Load Libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(here)
+library(sf)
+```
+
+The objective of this code is to compare the beach shoreline change rates for beaches protected by reefs and those not protected. We want to know if these rates differ and which sites experience more or less erosion by the island and island region.
+
+THe regions were defined by the fletcher erosion dataset. I recreated the spatial boundaries in qgis.
+```{r Importing Data}
+data<-st_read(here("2_output", "modified_shapefiles", "joined_databases","reefs_and_erosion_w_geometry_modified.gpkg"))
+regions<- st_read(here("0_data", "regions","island_regions_hawaii.shp"))
+coasts<-st_read(here("0_data", "coast","HawaiiLandEditedByBitterwolf.shp"))
+regions<- regions %>%
+  select(-c("id","Island"))
+#Make sure projections match
+st_crs(data) == st_crs(regions)
+
+joined_data<- st_join(data,regions)%>%
+  select(c("SRate_m","Region","Transect_Type",everything()))
+```
+
+
+```{r Plot by Island Transect Type and Zone}
+
+library(ggspatial)
+library(dplyr)
+
+
+
+#ggsave("Island_Zones.jpg", dpi = 1200, width = 12.5, height = 7.03, units = "in", limitsize= FALSE)
+
+
+
+joined_data<- joined_data %>%
+  select(SRate_m, Transect_Type, Island, Region) %>%
+  mutate(Island = factor(Island, c("Kauai", "Oahu", "Maui")),
+         Region = factor(Region, c("North", "East", "South", "West", "Kihei")))
+
+ggplot() +
+  geom_sf(data=joined_data, aes(color=Region), show.legend = "point")+
+  geom_sf(data = coasts, fill="antiquewhite", lwd = 0)+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+joined_data %>%
+  ggplot(aes(x=Region, fill=Transect_Type)) +
+  geom_bar(color="Black", position = "dodge")+
+ facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  facet_grid(~Island, scales = "free", space = "free", switch="both")+
+  theme(strip.placement = "outside")+
+  ylab("Sample Size")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+joined_data %>%
+  ggplot(aes(x=Region, y=SRate_m, fill=Transect_Type)) +
+  geom_bar(color="Black", position = "dodge", stat = "summary", fun = "mean")+
+ facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Mean Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+joined_data %>%
+  ggplot(aes(x=Region, y=SRate_m, fill=Transect_Type)) +
+  geom_bar(color="Black", position = "dodge", stat = "summary", fun = "median")+
+ facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Median Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+
+joined_data %>%
+  ggplot(aes(x=Region, y=SRate_m, fill=Transect_Type)) +
+  geom_boxplot()+
+  facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Mean Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+
+joined_data %>%
+  ggplot(aes (y=SRate_m, color=Transect_Type)) +
+  geom_density()+
+  facet_wrap(~Island+Region, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Mean Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+```
+
+```{r Site Aggregated}
+### Use Tukey's fences to remove outliers but keep sites where there is only 1 erosion value
+joined_data<- st_join(data,regions)%>%
+  select(c("SRate_m","Region","Transect_Type",everything()))
+joined_data <- joined_data %>%
+  group_by(Islxnam, Transect_Type) %>%
+  mutate(
+    Q1 = quantile(SRate_m, 0.25),
+    Q3 = quantile(SRate_m, 0.75),
+    IQR = Q3 - Q1,
+    Lower_Fence = Q1 - 3 * IQR,
+    Upper_Fence = Q3 + 3 * IQR,
+    n_erosion=n()
+  ) %>%
+  mutate(outlier=if_else(n_erosion==1,FALSE,(SRate_m <= Lower_Fence | SRate_m >= Upper_Fence)))%>% #Keep sites where there is only one erosion value
+  mutate(n_outlier=sum(outlier))%>%
+  ungroup()
+max(joined_data$n_outlier)
+
+# write_csv(joined_data, here("2_output", "dataframes","reefs_and_erosion_w_geometry-site_outliers.csv"))
+
+#save outlier summary data to join to summarized dataset later
+outlier_summary<-st_drop_geometry(joined_data)%>%
+  group_by(Islxnam, Transect_Type)%>%
+  dplyr::select(c("Islxnam","Q1":"n_erosion", "n_outlier"))%>%
+  distinct()
+
+## Aggregated Dataset using the median and the weighted mean **Note these aggregations will only affect the SRate_m value
+weighted_mean <- 
+  joined_data%>%
+  filter(outlier!=TRUE)%>% #Select only non-outliers
+  group_by(Islxnam, Transect_Type) %>%
+  mutate(transformed_uncertainty= 1/Suncert_m) %>%
+  summarise(SRate_wgt_mean=weighted.mean(SRate_m,transformed_uncertainty),
+            geom=st_cast(geom[which.min(st_distance(geom, st_centroid(st_union(geom))))], "POINT"),)
+# st_write(weighted_mean, here("2_output", "modified_shapefiles", "joined_databases", "test_mean_ersoion.gpkg"), delete_layer = TRUE)
+
+median_Srate<-joined_data%>%
+  filter(outlier!=TRUE)%>% #Select only non-outliers
+  group_by(Islxnam, Transect_Type) %>%
+  mutate(transformed_uncertainty= 1/Suncert_m)%>%
+  summarise(SRate_median=median(SRate_m),
+            geom=st_cast(geom[which.min(st_distance(geom, st_centroid(st_union(geom))))], "POINT"),)
+```
+
+```{r Comparing Erosion with Site aggregated data}
+regions<- st_read(here("0_data", "regions","island_regions_hawaii.shp"))
+site_data<- st_join(weighted_mean,regions)
+
+site_data<- site_data %>%
+  select(SRate_wgt_mean, Transect_Type, Island, Region) %>%
+  mutate(Island = factor(Island, c("Kauai", "Oahu", "Maui")),
+         Region = factor(Region, c("North", "East", "South", "West", "Kihei")))
+
+ggplot() +
+  geom_sf(data=site_data, aes(color=Region), show.legend = "point")+
+  geom_sf(data = coasts, fill="antiquewhite", lwd = 0)+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+site_data %>%
+  ggplot(aes(x=Region, fill=Transect_Type)) +
+  geom_bar(color="Black", position = position_dodge(preserve = "single"))+
+ facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  facet_grid(~Island, scales = "free", space = "free", switch="both")+
+  theme(strip.placement = "outside")+
+  ylab("Sample Size")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+site_data %>%
+  ggplot(aes(x=Region, y=SRate_wgt_mean, fill=Transect_Type)) +
+  geom_bar(color="Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean")+
+ facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Mean Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+site_data %>%
+  ggplot(aes(x=Region, y=SRate_wgt_mean, fill=Transect_Type)) +
+  geom_bar(color="Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "median")+
+ facet_wrap(~Island, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Median Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+
+site_data %>%
+  ggplot(aes(x=Region, y=SRate_wgt_mean, fill=Transect_Type)) +
+  geom_boxplot(position = position_dodge(preserve = "single"))+
+  facet_wrap(~Island, strip.position = "bottom", scales = "free_x", )+
+  theme(strip.placement = "outside")+
+  ylab("Mean Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+
+site_data %>%
+  ggplot(aes (y=SRate_wgt_mean, color=Transect_Type)) +
+  geom_density()+
+  facet_wrap(~Island+Region, strip.position = "bottom", scales = "free_x")+
+  theme(strip.placement = "outside")+
+  ylab("Mean Shoreline Change Rate (m/yr)")+
+  xlab("Region by Island")+
+  labs(fill='Transect Type')
+
+```
+
+
+
+Kruskal Wallis Test
+https://www.datanovia.com/en/lessons/kruskal-wallis-test-in-r/
+```{r}
+#install.packages("rstatix")
+library(rstatix)
+Chosen_Island= "Kauai"
+
+krusk_data <-st_drop_geometry(joined_data) %>% 
+  filter(Island ==Chosen_Island)%>%
+  select(SRate_m, Island, Region, Transect_Type) %>%
+  mutate(Group = str_c(Island," ", Region, " ", Transect_Type))%>%
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")),
+         Island = factor(Island, levels=c("Kauai", "Oahu", "Maui")),
+         Transect_Type = factor(Transect_Type, levels = c("Reef", "Non-Reef"))) %>%
+  arrange(Transect_Type) %>%
+  arrange(Region) %>%
+  arrange(Island)
+
+
+res.kruskal <- krusk_data %>%
+  kruskal_test(SRate_m ~ Group)
+res.kruskal
+krusk_data %>%
+  kruskal_effsize(SRate_m ~ Group)
+
+pwc.dunns <- krusk_data %>%
+  dunn_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.dunns
+
+pwc.wilcox <- krusk_data %>%
+  wilcox_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.wilcox
+
+pwc.dunns<- pwc.dunns %>% add_xy_position(x = "Group")
+ggpubr::ggboxplot(krusk_data, x = "Group", y = "SRate_m") +
+  ggpubr::stat_pvalue_manual(pwc.dunns, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.kruskal, detailed = TRUE),
+    caption = get_pwc_label(pwc.dunns)
+    )+
+  coord_flip()
+
+joined_df <- st_drop_geometry(joined_data) %>% 
+  filter(Island ==Chosen_Island)%>%
+  select(SRate_m, Island, Region, Transect_Type) %>%
+  mutate(group2 = str_c(Island," ", Region, " ", Transect_Type)) %>%
+  select(group2, Transect_Type, Region, Island) %>%
+  inner_join(pwc.wilcox) %>%
+  merge(pwc.wilcox) %>%
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")))
+
+
+joined_df %>%
+  select(group2, n2, Transect_Type, Region, Island)%>%
+  distinct()%>%
+  ggplot(aes(x= Transect_Type, y=n2, label= n2, fill=Transect_Type))+
+  geom_bar(stat = "identity")+
+  geom_text(nudge_y = 200)+
+  facet_wrap(~Region, strip.position = "top", scales = "free_x")+
+  ggtitle(Chosen_Island)+
+  xlab("Transect Type") +
+  ylab("Sample Size")+
+  labs(fill='Transect Type')
+
+
+
+
+st_drop_geometry(joined_data) %>% 
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")))%>%
+  group_by(Island, Region, Transect_Type)%>%
+  ggplot(aes(x=Region, y=SRate_m,fill=Transect_Type))+
+  geom_bar(color="Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean")+
+  stat_summary(fun.data = mean_sdl, geom = "errorbar", color="Black", position = position_dodge(preserve = "single"))+
+  ylab("Mean Shoreline Change Rate (m/yr.)")+
+  # ggtitle("Mean Shoreline Change Rate by Island, Region, and Transect Type")+
+  facet_grid(~Island, scales = "free", space = "free", switch="both")+
+  theme(strip.placement = "outside")+
+  labs(fill='Transect Type')
+
+#ggsave(filename ="./SRate_figure.png" ,dpi=300, width = 1920*1.5, height = 1080*1.5, units = "px")
+
+st_drop_geometry(joined_data) %>% 
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")))%>%
+  group_by(Island, Region, Reef_Zones)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  ggplot(aes(x=Region, y=SRate_m,fill=Reef_Zones))+
+  geom_bar(color="Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean")+
+  stat_summary(fun.data = mean_sdl, geom = "errorbar", color="Black", position = position_dodge(preserve = "single"))+
+  ylab("Mean Shoreline Change Rate (m/yr.)")+
+  # ggtitle("Mean Shoreline Change Rate by Island, Region, and Transect Type")+
+  facet_grid(~Island, scales = "free", space = "free", switch="both")+
+  theme(strip.placement = "outside")+
+  labs(fill='Transect Type')+
+  ggtitle("Comparing Reef Zones")
+
+st_drop_geometry(joined_data) %>% 
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")))%>%
+  group_by(Island, Region)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  ggplot(aes(x=Region, y=SRate_m,fill=Transect_Type))+
+  geom_bar(color="Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean")+
+  stat_summary(fun.data = mean_sdl, geom = "errorbar", color="Black", position = position_dodge(preserve = "single"))+
+  ylab("Mean Shoreline Change Rate (m/yr.)")+
+  # ggtitle("Mean Shoreline Change Rate by Island, Region, and Transect Type")+
+  facet_grid(~Island, scales = "free", space = "free", switch="both")+
+  theme(strip.placement = "outside")+
+  labs(fill='Transect Type')+
+  ggtitle("Comparing Transect Types but only for data used in regression (Flat+Crest) ")
+
+select_comparisons<-st_drop_geometry(joined_data)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  select(Island, Region, Transect_Type)%>%
+  distinct() %>%
+  group_by(Island, Region)%>%
+  count()%>%
+  mutate(keep=if_else(n==2,"keep","reject"))%>%
+  select(-n)
+  
+```
+
+
+
+```{r Kruskal Test For Relevant Reef Zones}
+
+#I want to compare the relevant reefs (Reefs with flats and crests) to. non reefs.
+
+#Get data
+kdata<-left_join(st_drop_geometry(joined_data),select_comparisons, by=c("Island", "Region"))%>%
+  select(keep,Island,Region,everything())%>%
+  filter(keep=="keep")%>%
+  group_by(Island, Region)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  select(SRate_m, Island, Region, Transect_Type) %>%
+  mutate(Group = str_c(Island," ", Region, " ", Transect_Type))%>%
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")),
+         Island = factor(Island, levels=c("Kauai", "Oahu", "Maui")),
+         Transect_Type = factor(Transect_Type, levels = c("Reef", "Non-Reef"))) %>%
+  arrange(Transect_Type) %>%
+  arrange(Region) %>%
+  arrange(Island)
+
+
+res.kruskal <- kdata %>%
+  kruskal_test(SRate_m ~ Group)
+res.kruskal
+
+kdata %>%
+  kruskal_effsize(SRate_m ~ Group)
+
+pwc.dunns <- kdata %>%
+  dunn_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.dunns
+
+pwc.wilcox <- kdata %>%
+  wilcox_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.wilcox
+
+pwc.dunns<- pwc.dunns %>% add_xy_position(x = "Group")
+
+ggpubr::ggboxplot(kdata, x = "Group", y = "SRate_m") +
+  ggpubr::stat_pvalue_manual(pwc.dunns, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.kruskal, detailed = TRUE),
+    caption = get_pwc_label(pwc.dunns)
+    )+
+  coord_flip()
+
+test<-kdata%>%
+  group_by(Island,Region,Transect_Type)%>%
+  summarise(Mean_Srate=round(mean(SRate_m),2))
+  
+write_csv(test, "test.csv")
+```
+
+
+
+```{r paper figure}
+
+comparison_data <-left_join(st_drop_geometry(joined_data), select_comparisons, by = c("Island", "Region")) %>%
+  select(keep, Island, Region, everything()) %>%
+  mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = recode(Transect_Type, "Reef" = "Reef Protected", "Non-Reef" = "Unprotected")
+  ) %>%
+  filter(keep == "keep") %>%
+  group_by(Island, Region) %>%
+  filter(Reef_Zones %in% c("Flat and Crest", "Flat, Crest, and Fore Reef", "No Reef"))
+write_csv(comparison_data, "test.csv")
+
+p <- left_join(st_drop_geometry(joined_data), select_comparisons, by = c("Island", "Region")) %>%
+  select(keep, Island, Region, everything()) %>%
+  mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = recode(Transect_Type, "Reef" = "Reef Protected", "Non-Reef" = "Unprotected")
+  ) %>%
+  filter(keep == "keep") %>%
+  group_by(Island, Region) %>%
+  filter(Reef_Zones %in% c("Flat and Crest", "Flat, Crest, and Fore Reef", "No Reef")) %>%
+  ggplot(aes(x = Region, y = SRate_m, fill = Transect_Type)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", color = "Black", position = position_dodge(preserve = "single")) +
+  geom_bar(color = "Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean") +
+  ylab("Mean Shoreline Change Rate (m/yr.)") +
+  facet_grid(~Island, scales = "free", space = "free", switch = "both") +
+  theme(strip.placement = "outside") +
+  labs(fill = 'Beach Type')
+
+# Calculate the number of observations per group
+obs_count <- left_join(st_drop_geometry(joined_data), select_comparisons, by = c("Island", "Region")) %>%
+  select(keep, Island, Region, everything()) %>%
+   mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = recode(Transect_Type, "Reef" = "Reef Protected", "Non-Reef" = "Unprotected")
+  ) %>%
+  filter(keep == "keep") %>%
+  group_by(Island, Region, Transect_Type) %>%
+  filter(Reef_Zones %in% c("Flat and Crest", "Flat, Crest, and Fore Reef", "No Reef")) %>%
+  summarise(count = n()) %>%
+  ungroup()
+
+# Add geom_text() to the plot to include count labels
+p + geom_label(data = obs_count, 
+               aes(x = Region, y = 0.03, label = paste("n\n", count, sep = "")), 
+               position = position_dodge(width = .9), 
+               vjust = 0.5,
+               size = 3,
+               show.legend = FALSE)
+
+test_results <- data.frame(
+  Island = c(
+    "Kauai", "Kauai", "Oahu", "Oahu", "Oahu", "Maui", "Maui",
+    "Kauai", "Kauai", "Oahu", "Oahu", "Oahu", "Maui", "Maui"
+  ),
+  Region = c(
+    "North", "East", "North", "East", "South", "West", "Kihei",
+    "North", "East", "North", "East", "South", "West", "Kihei"
+  ),
+  Transect_Type = c(
+    "Unprotected", "Unprotected", "Unprotected", "Unprotected", "Unprotected", "Unprotected", "Unprotected",
+    "Reef Protected", "Reef Protected", "Reef Protected", "Reef Protected", "Reef Protected", "Reef Protected", "Reef Protected"
+  ),
+  Mean_Srate = c(
+    -0.05, -0.06, -0.03, 0.18, 0, -0.1, -0.06,
+    -0.16, -0.19, -0.08, -0.05, -0.05, -0.15, -0.16
+  ),
+  Sig = c(
+    "p<0.001", "p=0.061", "p<0.001", "p<0.001", "p=0.155", "p=0.005", "p<0.001",
+    "p<0.001", "p=0.061", "p<0.001", "p<0.001", "p=0.155", "p=0.005", "p<0.001"
+  )
+)
+
+test_results<-test_results%>%
+  mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = factor(Transect_Type, c("Reef Protected", "Unprotected"))
+  )
+
+p + geom_label(data = filter(test_results, Region != "Reef Protected"), 
+               aes(x = Region, y = 0.03, label = paste(Sig, sep = "")), 
+               position = position_dodge(width = 0), 
+               vjust = 0.5,
+               size = 3,
+               fill = "white",
+               show.legend = FALSE) +
+  geom_label(data = obs_count, 
+               aes(x = Region, y = 0.08, label = paste("n= \n", count, sep = "")), 
+               position = position_dodge(width = .9), 
+               vjust = 0.5,
+               size = 3,
+               show.legend = FALSE)
+
+dir.create(here("3_report", "long-term_comparison"))
+figure_size <- 700
+ggsave(here("3_report", "long-term_comparison", "long_term_erosion.jpg"), width = 4 * figure_size, height = 3 * figure_size, dpi = 300, units = "px", limitsize = FALSE)
+
+
+
+```
+```{r island aggregation}
+test_data<-left_join(st_drop_geometry(joined_data), select_comparisons, by = c("Island", "Region")) %>%
+  select(keep, Island, Region, everything()) %>%
+  mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = recode(Transect_Type, "Reef" = "Reef Protected", "Non-Reef" = "Unprotected")
+  ) %>%
+  filter(keep == "keep") %>%
+  group_by(Island) %>%
+  filter(Reef_Zones %in% c("Flat and Crest", "Flat, Crest, and Fore Reef", "No Reef"))
+
+#beach level Aggregation
+
+test_data_2<-test_data %>%
+  group_by(Islxnam, Transect_Type)%>% 
+  mutate(transformed_uncertainty= 1/Suncert_m)%>%
+  summarize(SRate_wgt_mean=round(weighted.mean(SRate_m,transformed_uncertainty), digits = 3), 
+            SRate_Mean=round(mean(SRate_m), digits=3),
+            n=length(SRate_m))%>%
+  mutate(difference=SRate_wgt_mean-SRate_Mean)
+
+
+  ggplot(aes(x = Transect_Type, y = SRate_m, color = Transect_Type)) +
+  geom_point(alpha=1, stat = "summary", fun = "median")+
+  geom_point(alpha=1, stat = "summary", fun = "mean", shape=0)+
+  facet_wrap(~Island)+
+  # stat_summary(fun.data = mean_se, geom = "errorbar", color = "Black", position = position_dodge(preserve = "single")) +
+  # geom_bar(color = "Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean") +
+  ylab("Mean Shoreline Change Rate (m/yr.)") +
+  theme(strip.placement = "outside")
+  # labs(fill = 'Beach Type')
+
+```
+
+
+
+```{r compare outlier removal, eval=FALSE, include=FALSE}
+
+### Use Tukey's fences to remove outliers but keep sites where there is only 1 erosion value
+outliers <- left_join(st_drop_geometry(joined_data),select_comparisons, by=c("Island", "Region"))%>%
+  select(keep,Island,Region,everything())%>%
+  filter(keep=="keep")%>%
+  group_by(Island, Region)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  select(SRate_m, Island, Region, Transect_Type) %>%
+  mutate(Group = str_c(Island," ", Region, " ", Transect_Type))%>%
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")),
+         Island = factor(Island, levels=c("Kauai", "Oahu", "Maui")),
+         Transect_Type = factor(Transect_Type, levels = c("Reef", "Non-Reef"))) %>%
+  arrange(Transect_Type) %>%
+  arrange(Region) %>%
+  arrange(Island) %>%
+  group_by(Group) %>%
+  mutate(
+    Q1 = quantile(SRate_m, 0.25),
+    Q3 = quantile(SRate_m, 0.75),
+    IQR = Q3 - Q1,
+    Lower_Fence = Q1 - 3 * IQR,
+    Upper_Fence = Q3 + 3 * IQR,
+    n_erosion=n()
+  ) %>%
+  mutate(outlier=if_else(n_erosion==1,FALSE,(SRate_m <= Lower_Fence | SRate_m >= Upper_Fence)))%>% #Keep sites where there is only one erosion value
+  mutate(n_outlier=sum(outlier))
+max(outliers$n_outlier)
+
+
+outliers%>%
+ggplot(aes(x=Group, y=SRate_m, color=outlier))+
+  geom_point()
+
+kdata_no_out<-left_join(st_drop_geometry(joined_data),select_comparisons, by=c("Island", "Region"))%>%
+  select(keep,Island,Region,everything())%>%
+  filter(keep=="keep")%>%
+  group_by(Island, Region)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  select(SRate_m, Island, Region, Transect_Type) %>%
+  mutate(Group = str_c(Island," ", Region, " ", Transect_Type))%>%
+  mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")),
+         Island = factor(Island, levels=c("Kauai", "Oahu", "Maui")),
+         Transect_Type = factor(Transect_Type, levels = c("Reef", "Non-Reef"))) %>%
+  arrange(Transect_Type) %>%
+  arrange(Region) %>%
+  arrange(Island)
+
+kdata_no_out<-kdata_no_out%>%
+mutate(
+    Q1 = quantile(SRate_m, 0.25),
+    Q3 = quantile(SRate_m, 0.75),
+    IQR = Q3 - Q1,
+    Lower_Fence = Q1 - 3 * IQR,
+    Upper_Fence = Q3 + 3 * IQR,
+    n_erosion=n()
+  ) %>%
+  mutate(outlier=if_else(n_erosion==1,FALSE,(SRate_m <= Lower_Fence | SRate_m >= Upper_Fence)))
+
+kdata_no_out<-kdata_no_out %>%
+  filter(outlier==FALSE)%>%
+  select(SRate_m, Island, Region, Transect_Type, Group)%>% 
+    mutate(Region = factor(Region, levels=c("North", "East", "South", "West", "Kihei")),
+         Island = factor(Island, levels=c("Kauai", "Oahu", "Maui")),
+         Transect_Type = factor(Transect_Type, levels = c("Reef", "Non-Reef"))) %>%
+  arrange(Transect_Type) %>%
+  arrange(Region) %>%
+  arrange(Island)
+
+res.kruskal_no_out <- kdata_no_out %>%
+  kruskal_test(SRate_m ~ Group)
+
+res.kruskal_no_out
+
+kdata_no_out %>%
+  kruskal_effsize(SRate_m ~ Group)
+
+pwc.dunns_no_out <- kdata_no_out %>%
+  dunn_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.dunns_no_out
+
+pwc.wilcox_no_out <- kdata_no_out %>%
+  wilcox_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.wilcox
+
+pwc.dunns_no_out<- pwc.dunns_no_out %>% add_xy_position(x = "Group")
+
+ggpubr::ggboxplot(kdata_no_out, x = "Group", y = "SRate_m") +
+  ggpubr::stat_pvalue_manual(pwc.dunns_no_out, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.kruskal, detailed = TRUE),
+    caption = get_pwc_label(pwc.dunns_no_out)
+    )
+kdata_no_out %>%
+ggplot(aes(x=Group, y=SRate_m, fill=Transect_Type))+
+  stat_summary(fun.data = mean_se, geom = "errorbar", color="Black", position = position_dodge(preserve = "single"))+
+  geom_bar(color="Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+

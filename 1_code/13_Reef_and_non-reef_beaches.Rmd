@@ -1,0 +1,148 @@
+---
+title: "Reef_and_non-reef_beaches"
+output: html_document
+date: "2023-11-10"
+---
+
+This Rmarkdown document creates a few plots for the paper.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Import Data}
+library(tidyverse)
+library(sf)
+library(here)
+
+Reefs_and_erosion<-st_read(here("2_output", "modified_shapefiles", "joined_databases", "reefs_and_erosion_w_geometry_modified.gpkg"))
+
+Reefs_and_erosion<-Reefs_and_erosion%>%
+  dplyr::select(SRate_m, Suncert_m,Sstd_m, everything()) 
+
+st_drop_geometry(Reefs_and_erosion)%>%
+  group_by(Island, AreaName, Reef_Zones)%>%
+  select(Island,AreaName,SRate_m,Reef_Zones)%>%
+  summarise(n_srate=length(SRate_m))%>%
+  group_by(Island,AreaName) %>%
+  summarize(All_No_Reef = all(Reef_Zones == "No Reef")) %>%
+  ungroup()
+
+
+st_drop_geometry(Reefs_and_erosion)%>%
+  group_by(Island, AreaName, Reef_Zones)%>%
+  select(Island,AreaName,SRate_m,Reef_Zones)%>%
+  summarise(n_srate=length(SRate_m))%>%
+  group_by(Island,AreaName) %>%
+  summarize(All_No_Reef = all(Reef_Zones == "No Reef"), .groups = 'drop') %>%
+  filter(All_No_Reef) %>%
+  group_by(Island) %>%
+  summarize(Count_No_Reef_Beaches = n(), .groups = 'drop')
+  
+
+
+# Step 1: Flag beaches with exclusively 'No Reef' and those with reef values
+df<- st_drop_geometry(Reefs_and_erosion)
+
+beach_flags <- df %>%
+  group_by(Island, AreaName) %>%
+  summarize(Exclusively_No_Reef = all(Reef_Zones == "No Reef"), 
+            Has_Reef = any(Reef_Zones != "No Reef"), 
+            .groups = 'drop')
+
+# Step 2: Count the number of beaches in each category by island
+beach_counts <- beach_flags %>%
+  group_by(Island) %>%
+  summarize(No_Reef_Beach_Count = sum(Exclusively_No_Reef), 
+            Reef_Beach_Count = sum(Has_Reef), 
+            .groups = 'drop')
+
+# View the resulting data frame
+print(beach_counts)
+
+```
+
+
+```{r make plot for beach composition}
+
+
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Assuming your data is in a dataframe named df
+# Prepare the data
+beach_flags <- df %>%
+  group_by(Island, AreaName) %>%
+  summarize(Exclusively_No_Reef = all(Reef_Zones == "No Reef"), 
+            Has_Reef = any(Reef_Zones != "No Reef"), 
+            .groups = 'drop')
+
+beach_counts <- beach_flags %>%
+  group_by(Island) %>%
+  summarize(No_Reef_Beach_Count = sum(Exclusively_No_Reef), 
+            Reef_Beach_Count = sum(Has_Reef), 
+            .groups = 'drop') %>%
+  pivot_longer(cols = c(No_Reef_Beach_Count, Reef_Beach_Count), 
+               names_to = "Type", 
+               values_to = "Count")
+
+# Create the ggplot
+ggplot(beach_counts, aes(x = Island, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_minimal() +
+  labs(title = "Count of Beaches With and Without Reefs by Island",
+       x = "Island",
+       y = "Count of Beaches",
+       fill = "Beach Type")
+
+
+
+```
+
+
+```{r make plot summarizing erosion values}
+
+library(ggrepel)
+erosion<-rownames_to_column(df)
+write_csv(erosion, "test2.csv")
+
+erosion_summary<-erosion%>%
+  group_by(Reef_Zones)%>%
+  summarize(count=length(SRate_m),
+            percent=round((count/11152)*100,1))
+
+
+erosion_summary<-erosion_summary%>%
+  mutate(Reef_Zones=factor(Reef_Zones))%>%
+  mutate(Reef_Zones=fct_relevel(Reef_Zones, c("Flat Only","Crest Only", "Fore Reef Only", "Flat and Crest",  "Crest and Fore Reef","Flat and Fore Reef", "Flat, Crest, and Fore Reef", "No Reef" )))%>%
+  arrange(Reef_Zones)%>%
+  mutate(omit=if_else(Reef_Zones=="Flat, Crest, and Fore Reef", "Include", 
+                      if_else(Reef_Zones=="Flat and Crest", "Include", "Omit")))
+
+
+
+pie_label <- 
+  erosion_summary %>% 
+  mutate(perc = count/ sum(count)) %>% 
+  mutate(labels = scales::percent(perc)) %>% 
+  arrange(desc(Reef_Zones)) %>% ## arrange in the order of the legend
+  mutate(text_y = cumsum(count) - count/2) ### calculate where to place the text labels
+
+pie_label %>%
+  ggplot(aes(x = "", y = count, fill = Reef_Zones)) + 
+  geom_col(color="black") +
+  coord_polar(theta = "y") +
+  geom_label_repel(aes(label = paste(round(perc,2)*100,"%"), y = text_y), 
+                   nudge_x = 0.3, nudge_y = 0.3,
+                   size = 5, show.legend = F) +
+  scale_fill_viridis_d(option = "A", begin = 0.5, end = 1)+
+  guides(fill = guide_legend(title = "Reef Zone")) +
+  theme_void()
+
+
+figure_size<-600
+ggsave(here("3_report", "long-term_comparison","pie_chart-erosion.jpg"), width = 4*figure_size, height = 3*figure_size, dpi = 300 , units = "px", limitsize = FALSE)
+```
+
+```

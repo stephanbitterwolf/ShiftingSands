@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <idinfo>
+    <citation>
+      <citeinfo>
+        <origin>U.S. Geological Survey</origin>
+        <pubdate>20170308</pubdate>
+        <title>Maui, Hawaii-Seafloor elevation change in Maui, St. Croix, St. Thomas, and the Florida Keys</title>
+        <edition>first</edition>
+        <geoform>tabular digital data</geoform>
+        <serinfo>
+          <sername>U.S. Geological Survey Data Release</sername>
+          <issue>doi:10.5066/F7WQ01W0</issue>
+        </serinfo>
+        <pubinfo>
+          <pubplace>St. Petersburg, FL</pubplace>
+          <publish>U.S. Geological Survey</publish>
+        </pubinfo>
+        <onlink>http://dx.doi.org/10.5066/F7WQ01W0</onlink>
+      </citeinfo>
+    </citation>
+    <descript>
+      <abstract>Coral reefs serve as natural barriers that protect adjacent shorelines from coastal hazards such as storms, waves and erosion but projections indicate global degradation of coral reefs due to anthropogenic impacts and climate change will cause a transition to net erosion by mid-century. The U.S. Geological Survey (USGS) St. Petersburg Coastal and Marine Science Center conducted research to quantify the combined effect of all constructive and destructive processes on modern coral reef ecosystems by measuring regional-scale changes in seafloor elevation. USGS staff assessed five coral reef ecosystems in the Atlantic Ocean (Upper and Lower Florida Keys), Caribbean Sea (U.S. Virgin Islands: St. Thomas and Buck Island, St. Croix), and Pacific Ocean (Maui, Hawaii), including both coral-dominated and adjacent, non-coral dominated habitats. Scientists used historical bathymetric data from the 1930s to 1980s and contemporary light detection and ranging (lidar) digital elevation models (DEMs) from the late 1990s to 2000s to calculate changes in seafloor elevation for each study site over time periods reflecting low to high anthropogenic impacts. Maui_ElevationChange.zip contains the location, elevation, and elevation change data for Maui, Hawaii. Using these changes in elevation, further analysis was done to calculate corresponding changes in seafloor volume for all study areas and habitat types within each site</abstract>
+      <purpose>These data were used to help provide a comprehensive assessment of the combined effect of all processes influencing seafloor accretion and erosion by measuring changes in seafloor elevation and volume for five coral reef ecosystems in the Atlantic and Pacific oceans and Caribbean Sea over the last several decades. Additional methodology and data details are available in Yates and others (2016).</purpose>
+      <supplinf>All data sources and descriptions used in the creation of Maui_ElevationChange.csv are listed in Yates and others (2016).</supplinf>
+    </descript>
+    <timeperd>
+      <timeinfo>
+        <mdattim>
+          <sngdate>
+            <caldate>1961</caldate>
+          </sngdate>
+          <sngdate>
+            <caldate>1999</caldate>
+          </sngdate>
+        </mdattim>
+      </timeinfo>
+      <current>ground condition</current>
+    </timeperd>
+    <status>
+      <progress>Complete</progress>
+      <update>Not planned</update>
+    </status>
+    <spdom>
+      <bounding>
+        <westbc>-156.705843</westbc>
+        <eastbc>-155.963963</eastbc>
+        <northbc>21.036219</northbc>
+        <southbc>20.565836</southbc>
+      </bounding>
+    </spdom>
+    <keywords>
+      <theme>
+        <themekt>ISO 19115 Topic Category</themekt>
+        <themekey>geoscientificInformation</themekey>
+        <themekey>elevation</themekey>
+        <themekey>oceans</themekey>
+      </theme>
+      <theme>
+        <themekt>None</themekt>
+        <themekey>seafloor elevation</themekey>
+        <themekey>sea level rise</themekey>
+        <themekey>coral reefs</themekey>
+        <themekey>seafloor accretion</themekey>
+        <themekey>seafloor erosion</themekey>
+      </theme>
+      <theme>
+        <themekt>Global Change Master Science Directory</themekt>
+        <themekey>OCEAN &gt; BATHYMETRY/SEAFLOOR TOPOGRAPHY &gt; WATER DEPTH</themekey>
+        <themekey>OCEAN &gt; COASTAL PROCESSES &gt; CORAL REEFS</themekey>
+        <themekey>OCEAN &gt; COASTAL PROCESSES &gt; EROSION</themekey>
+        <themekey>OCEAN &gt; COASTAL PROCESSES &gt; SEA LEVEL RISE</themekey>
+        <themekey>DOI/USGS/CMG &gt; COASTAL AND MARINE GEOLOGY, U.S. GEOLOGICAL SURVEY, U.S. DEPARTMENT OF INTERIOR</themekey>
+      </theme>
+      <theme>
+        <themekt>GCMD Instrument</themekt>
+        <themekey>LIDAR &gt; LIGHT DETECTION AND RANGING</themekey>
+      </theme>
+      <theme>
+        <themekt>USGS Thesaurus</themekt>
+        <themekey>coelenterates</themekey>
+        <themekey>geochemistry</themekey>
+        <themekey>marine geology</themekey>
+      </theme>
+      <place>
+        <placekt>Geographic Names Information System</placekt>
+        <placekey>Maui</placekey>
+        <placekey>Hawaii</placekey>
+      </place>
+      <stratum>
+        <stratkt>Oregon Geospatial Enterprise Office (GEO) Stratum Keyword</stratkt>
+        <stratkey>epipelagic</stratkey>
+      </stratum>
+      <temporal>
+        <tempkt>None</tempkt>
+        <tempkey>1938-2004</tempkey>
+      </temporal>
+    </keywords>
+    <accconst>None</accconst>
+    <useconst>Public domain data from the U.S. Government are freely redistributable with proper metadata and source attribution. The U.S. Geological Survey requests to be acknowledged as originator of these data in future products or derivative research.</useconst>
+    <ptcontac>
+      <cntinfo>
+        <cntperp>
+          <cntper>Kimberly Yates</cntper>
+          <cntorg>U.S. Geological Survey, St. Petersburg Coastal and Marine Science Center, St. Petersburg, FL</cntorg>
+        </cntperp>
+        <cntaddr>
+          <addrtype>mailing and physical</addrtype>
+          <address>600 4th Street South</address>
+          <city>St. Petersburg</city>
+          <state>FL</state>
+          <postal>33701</postal>
+          <country>USA</country>
+        </cntaddr>
+        <cntvoice>727 502-8059</cntvoice>
+        <cntemail>kyates@usgs.gov</cntemail>
+      </cntinfo>
+    </ptcontac>
+    <datacred>Acknowledgment of the U.S. Geological Survey, St. Petersburg Coastal and Marine Science Center, as a data source would be appreciated in products developed from these data, and such acknowledgment as is standard for citation and legal practices for data source is expected. Sharing of new data layers developed directly from these data would also be appreciated by the U.S. Geological Survey staff. Users should be aware that comparisons with other datasets for the same area from other periods may be inaccurate because of inconsistencies resulting from changes in photointerpretation, mapping conventions, and digital processes over time. These data are not legal documents and are not to be used as such.</datacred>
+    <secinfo>
+      <secsys>Unclassified</secsys>
+      <secclass>Unclassified</secclass>
+      <sechandl>None</sechandl>
+    </secinfo>
+    <native>Microsoft Windows 7 Enterprise Service Pack 1; Microsoft Excel 2013</native>
+    <crossref>
+      <citeinfo>
+        <origin>Yates, K.K., Zawada, D.G., Smiley, N.A., and Tiling-Range, G.</origin>
+        <pubdate>20170417</pubdate>
+        <title>Divergence of seafloor elevation and sea level rise in coral reef ecosystems</title>
+        <serinfo>
+          <sername>Biogeosciences</sername>
+          <issue>14:1-34</issue>
+        </serinfo>
+        <pubinfo>
+          <pubplace>St. Peterburg, FL.</pubplace>
+          <publish>biogeosciences.net</publish>
+        </pubinfo>
+        <onlink>https://doi.org/10.5194/bg-14-1739-2017</onlink>
+      </citeinfo>
+    </crossref>
+  </idinfo>
+  <dataqual>
+    <attracc>
+      <attraccr>A detailed accuracy assessment and error analysis are presented in Yates and others (2016).</attraccr>
+    </attracc>
+    <logic>Data cover area specified for this project without known issues.</logic>
+    <complete>This dataset is considered complete for the information presented, as described in the abstract section. Users are advised to read the rest of the metadata record and Yates et al. (2016) carefully for additional details.</complete>
+    <posacc>
+      <horizpa>
+        <horizpar>+/- 3 meters (1 standard deviation)</horizpar>
+      </horizpa>
+      <vertacc>
+        <vertaccr>0.15cm Collected to meet value (meters) at 1 standard deviation</vertaccr>
+      </vertacc>
+    </posacc>
+    <lineage>
+      <procstep>
+        <procdesc>For processing steps and descriptions please refer to: Yates, K.K., Zawada, D.G., Smiley, N.A., Tiling-Range, G., 2016, Seafloor elevation change in Maui, St. Croix, St. Thomas, and the Florida Keys: U.S. Geological Survey data release, https://doi.org/10.5194/bg-14-1-2017</procdesc>
+        <procdate>2015</procdate>
+        <proccont>
+          <cntinfo>
+            <cntperp>
+              <cntper>Kimberly Yates</cntper>
+              <cntorg>U.S. Geological Survey, St. Petersburg Coastal and Marine Science Center, St. Petersburg, FL</cntorg>
+            </cntperp>
+            <cntpos>Research Oceanographer</cntpos>
+            <cntaddr>
+              <addrtype>Mailing and physical</addrtype>
+              <address>600 4th Street South</address>
+              <city>St. Petersburg</city>
+              <state>FL</state>
+              <postal>33701</postal>
+              <country>USA</country>
+            </cntaddr>
+            <cntvoice>727-502-8059</cntvoice>
+            <cntemail>kyate@usgs.gov</cntemail>
+            <hours>M-F, 9:00-5:00 ET</hours>
+          </cntinfo>
+        </proccont>
+      </procstep>
+    </lineage>
+  </dataqual>
+  <spdoinfo>
+    <indspref>Points</indspref>
+    <direct>Point</direct>
+  </spdoinfo>
+  <spref>
+    <horizsys>
+      <geograph>
+        <latres>1.0E-6</latres>
+        <longres>1.0E-6</longres>
+        <geogunit>Decimal degrees</geogunit>
+      </geograph>
+      <geodetic>
+        <horizdn>North American Datum of 1983 (1986)</horizdn>
+        <ellips>Geodetic Reference System 80</ellips>
+        <semiaxis>6378137.0</semiaxis>
+        <denflat>298.257222101</denflat>
+      </geodetic>
+    </horizsys>
+    <vertdef>
+      <depthsys>
+        <depthdn>Mean Lower Low Water</depthdn>
+        <depthres>1.0</depthres>
+        <depthdu>meters</depthdu>
+        <depthem>Explicit depth coordinate included with horizontal coordinates</depthem>
+      </depthsys>
+    </vertdef>
+  </spref>
+  <eainfo>
+    <detailed>
+      <enttyp>
+        <enttypl>Maui_ElevationChange.csv</enttypl>
+        <enttypd>This file contains data, provided in comma separated values (CSV) format, that were used to compute seafloor elevation change at Maui, Hawaii</enttypd>
+        <enttypds>USGS</enttypds>
+      </enttyp>
+      <attr>
+        <attrlabl>HSHEET</attrlabl>
+        <attrdef>Hydrographic survey sheet number. The hydrographic sheet (Hsheet) from which the historical bathymetric elevation data was collected.</attrdef>
+        <attrdefs>NOAA</attrdefs>
+        <attrdomv>
+          <udom>H08576, H08577, H08578, H08579, H08580, H08581, H08680, H08681,H08682, H08683, H08685, H08686, H08687, H08717, H08718, H08719, H08720, H08721, H08723, H08792, H08793, H08825, H08826</udom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>YEAR</attrlabl>
+        <attrdef>Survey Year. Year hydrographic sheet was published</attrdef>
+        <attrdefs>NOAA</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>1961</rdommin>
+            <rdommax>1966</rdommax>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>Longitude (Geographic NAD83)</attrlabl>
+        <attrdef>Longitude geogrpahic coordinate in NAD83(1986)</attrdef>
+        <attrdefs>USGS</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>155.97005</rdommin>
+            <rdommax>156.70067</rdommax>
+            <attrunit>decimal degrees</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>Latitude (Geographic NAD83)</attrlabl>
+        <attrdef>Latitude geogrpahic coordinate in NAD83(1986)</attrdef>
+        <attrdefs>USGS</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>20.57236</rdommin>
+            <rdommax>21.03491</rdommax>
+            <attrunit>decimal degrees</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>Longitude (UTM NAD83)</attrlabl>
+        <attrdef>X-coordinate (easting) of sample point, in meters (NAD83, UTM zone 4 N).</attrdef>
+        <attrdefs>USGS</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>739142.5405</rdommin>
+            <rdommax>815590.2778</rdommax>
+            <attrunit>Meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>Latitude (UTM NAD83</attrlabl>
+        <attrdef>Y-coordinate (northing) of sounding, in meters (NAD83, UTM zone 4 N).</attrdef>
+        <attrdefs>USGS</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>2277028.924</rdommin>
+            <rdommax>2327880.562</rdommax>
+            <attrunit>Meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>Historical sounding (Mean lower low water)</attrlabl>
+        <attrdef>Historical depth in MLLW. Negative values indicate below MLLW.</attrdef>
+        <attrdefs>U.S. Coast and Geodetic Survey</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-19.9768</rdommin>
+            <rdommax>-0.0667</rdommax>
+            <attrunit>Meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>LiDAR elevation (Mean lower low water)</attrlabl>
+        <attrdef>Modern depth in MLLW. Negative values indicate below MLLW.</attrdef>
+        <attrdefs>USGS</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-35.78900146</rdommin>
+            <rdommax>3.131999254</rdommax>
+            <attrunit>Meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+      <attr>
+        <attrlabl>Difference = Lidar - Historical.</attrlabl>
+        <attrdef>The difference between the modern (lidar) and historical (Hsheets) depths. Negative values indicate loss of seafloor elevation. Positive values indicate a gain in seafloor elevation</attrdef>
+        <attrdefs>USGS</attrdefs>
+        <attrdomv>
+          <rdom>
+            <rdommin>-28.6933108</rdommin>
+            <rdommax>11.77069907</rdommax>
+            <attrunit>Meters</attrunit>
+          </rdom>
+        </attrdomv>
+      </attr>
+    </detailed>
+  </eainfo>
+  <distinfo>
+    <distrib>
+      <cntinfo>
+        <cntperp>
+          <cntper>Kimberly Yates</cntper>
+          <cntorg>USGS</cntorg>
+        </cntperp>
+        <cntaddr>
+          <addrtype>mailing and physical</addrtype>
+          <address>600 4th Street South</address>
+          <city>St. Petersburg</city>
+          <state>FL</state>
+          <postal>33701</postal>
+          <country>USA</country>
+        </cntaddr>
+        <cntvoice>727 502-8059</cntvoice>
+        <cntemail>kyates@usgs.gov</cntemail>
+      </cntinfo>
+    </distrib>
+    <resdesc>Maui_ElevationChange.csv</resdesc>
+    <distliab>Although these data have been processed successfully on a computer system at the U.S. Geological Survey (USGS), no warranty expressed or implied is made regarding the display or utility of the data on any other system, or for general or scientific purposes, nor shall the act of distribution constitute any such warranty. The USGS shall not be held liable for improper or incorrect use of the data described or contained herein. Any use of trade, firm, or product names is for descriptive purposes only and does not imply endorsement by the U.S. Government.</distliab>
+    <stdorder>
+      <digform>
+        <digtinfo>
+          <formname>CSV(Comma Separated Values)</formname>
+          <formvern>1</formvern>
+          <formspec>RFC 4180</formspec>
+        </digtinfo>
+        <digtopt>
+          <onlinopt>
+            <computer>
+              <networka>
+                <networkr>https://coastal.er.usgs.gov/data-release/doi-F7WQ01W0/data/Maui_ElevationChange.zip</networkr>
+              </networka>
+            </computer>
+          </onlinopt>
+        </digtopt>
+      </digform>
+      <fees>None</fees>
+    </stdorder>
+  </distinfo>
+  <metainfo>
+    <metd>20170303</metd>
+    <metc>
+      <cntinfo>
+        <cntperp>
+          <cntper>Kimberly Yates</cntper>
+          <cntorg>U.S. Geological Survey, St. Petersburg Coastal and Marine Science Center, St. Petersburg, FL</cntorg>
+        </cntperp>
+        <cntpos>Research Oceanographer</cntpos>
+        <cntaddr>
+          <addrtype>mailing and physical</addrtype>
+          <address>600 4th Street South</address>
+          <city>St. Petersburg</city>
+          <state>FL</state>
+          <postal>33701</postal>
+          <country>USA</country>
+        </cntaddr>
+        <cntvoice>727 502-8059</cntvoice>
+        <cntemail>kyates@usgs.gov</cntemail>
+        <hours>M-F, 9:00-5:00 ET</hours>
+      </cntinfo>
+    </metc>
+    <metstdn>Content Standard for Digital Geospatial Metadata</metstdn>
+    <metstdv>FGDC-STD-001-1998</metstdv>
+    <mettc>local time</mettc>
+  </metainfo>
+</metadata>

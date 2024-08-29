@@ -1,0 +1,187 @@
+---
+title: "Comparing Shoreline Erosion: Reef vs Non-Reef"
+output: html_document
+date: "2024-02-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages}
+library(here)
+library(sf)
+library(tidyverse)
+
+```
+
+```{r Import Data}
+
+erosion_comparison<-st_read(here("2_output", "modified_shapefiles", "joined_databases", "reefs_and_erosion_w_geometry_modified.gpkg"))
+erosion_comparison<-erosion_comparison%>%
+  dplyr::select(SRate_m, Suncert_m,Sstd_m, everything()) 
+
+
+regions<- st_read(here("0_data", "regions","island_regions_hawaii.shp"))
+coasts<-st_read(here("0_data", "coast","HawaiiLandEditedByBitterwolf.shp"))
+regions<- regions %>%
+  select(-c("id","Island"))
+#Make sure projections match
+st_crs(erosion_comparison) == st_crs(regions)
+
+joined_data<- st_join(erosion_comparison,regions)%>%
+  select(c("SRate_m","Region","Transect_Type",everything()))
+```
+
+
+```{r plot erosion differences, dev='png', fig.show='hide'}
+
+# Define consistent colors for Transect Types
+transect_colors <- c("Reef Protected" = "#1f77b4", "Unprotected" = "#ff7f0e")
+
+plot_data<-st_drop_geometry(joined_data)%>%
+  mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = recode(Transect_Type, "Reef" = "Reef Protected", "Non-Reef" = "Unprotected")
+  )
+  
+
+plot_data %>%
+  filter(Reef_Zones %in% c("Flat and Crest", "Flat, Crest, and Fore Reef", "No Reef")) %>%
+  ggplot(aes(x = Region, y = SRate_m, color = Transect_Type)) +
+  geom_point(alpha = 1, stat = "summary", fun = "median") +
+  geom_point(alpha = 1, stat = "summary", fun = "mean", shape = 0) +
+  facet_wrap(~Island) +
+  ylab("Mean Shoreline Change Rate (m/yr)") +
+  theme(strip.placement = "outside") +
+  scale_color_manual(values = transect_colors) +
+  scale_x_discrete(limits = c("North", "East", "South", "West", "Kihei"))+
+  labs(color = "Beach Type")
+
+
+plot_data %>%
+  ggplot(aes(x = Island, y = SRate_m, color = Transect_Type)) +
+  geom_point(alpha = 1, stat = "summary", fun = "median") +
+  geom_point(alpha = 1, stat = "summary", fun = "mean", shape = 0) +
+  ylab("Mean Shoreline Change Rate (m/yr)") +
+  theme(strip.placement = "outside") +
+  scale_color_manual(values = transect_colors) +
+  scale_x_discrete(limits = c("Kauai", "Oahu", "Maui"))+
+  labs(color = "Beach Type")+
+  theme_classic()
+```
+
+![This plot shows the median and mean shoreline change rates for reef or non-reef protected shores.](`r knitr::fig_chunk('plot erosion differences', 'png')`)
+Only shores protected by reefs having both reef flats and crests are considered reef protected. Non-reef protected shores do not contain any reef features. The values in this plot are not filtered otherwise. However, it is clear that not all regions have equal representation of reef and non-reef values. For example, Kauai South and Oahu West do not have reef values while Maui North lacks non-reef values. Therefore, it may be necessary to exclude these regions if a comparisons at the region scale are desired.
+
+In the following code sections I will compare the influence of these regions with only one shoreline type on the island aggregation
+```{r Comparisons}
+
+#Select only island regions containing both reef and non reef data
+## This excludes regions dominated by only one beach type.
+select_comparisons<-st_drop_geometry(joined_data)%>%
+  filter(Reef_Zones%in%c("Flat and Crest","Flat, Crest, and Fore Reef", "No Reef"))%>%
+  select(Island, Region, Transect_Type)%>%
+  distinct() %>%
+  group_by(Island, Region)%>%
+  count()%>%
+  mutate(keep=if_else(n==2,"keep","reject"))%>%
+  select(-n)
+
+comparison_data<-left_join(plot_data, select_comparisons, by = c("Island", "Region")) %>%
+  select(keep, Island, Region, everything()) %>%
+  mutate(
+    Region = factor(Region, levels = c("North", "East", "South", "West", "Kihei")),
+    Island = factor(Island, levels = c("Kauai", "Oahu", "Maui")),
+    Transect_Type = recode(Transect_Type, "Reef" = "Reef Protected", "Non-Reef" = "Unprotected")
+  ) %>%
+  filter(keep == "keep") %>%
+  group_by(Island) %>%
+  filter(Reef_Zones %in% c("Flat and Crest", "Flat, Crest, and Fore Reef", "No Reef"))
+
+comparison_data %>%
+  ggplot(aes(x = Region, y = SRate_m, color = Transect_Type)) +
+  geom_point(alpha = 1, stat = "summary", fun = "median") +
+  geom_point(alpha = 1, stat = "summary", fun = "mean", shape = 0) +
+  facet_wrap(~Island) +
+  ylab("Mean Shoreline Change Rate (m/yr)") +
+  theme(strip.placement = "outside") +
+  scale_color_manual(values = transect_colors) +
+  scale_x_discrete(limits = c("North", "East", "South", "West", "Kihei"))+
+  labs(color = "Beach Type")
+
+comparison_data %>%
+  ggplot(aes(x = Island, y = SRate_m, color = Transect_Type)) +
+  geom_point(alpha = 1, stat = "summary", fun = "median") +
+  geom_point(alpha = 1, stat = "summary", fun = "mean", shape = 0) +
+  ylab("Mean Shoreline Change Rate (m/yr)") +
+  theme(strip.placement = "outside") +
+  scale_color_manual(values = transect_colors) +
+  scale_x_discrete(limits = c("Kauai", "Oahu", "Maui"))+
+  labs(color = "Beach Type")
+```
+
+```{r final figure}
+comparison_data %>%
+ggplot(aes(x = Island, y = SRate_m, fill = Transect_Type)) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", color = "Black", position = position_dodge(preserve = "single")) +
+  geom_bar(color = "Black", position = position_dodge(preserve = "single"), stat = "summary", fun = "mean") +
+  ylab("Mean Shoreline Change Rate (m/yr)") +
+  facet_grid(~Island, scales = "free", space = "free", switch = "both") +
+  theme(strip.placement = "outside") +
+    scale_fill_manual(values = transect_colors) +
+  labs(fill = 'Beach Type')+
+  theme_classic()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x = element_blank())
+
+
+figure_size <- 700
+ggsave(filename = "figure2.png", path = here("3_report"), width = 4 * figure_size, height = 3 * figure_size, dpi = 300, units = "px", limitsize = FALSE )
+
+```
+
+
+```{r Kruskal Test For Relevant Reef Zones}
+library(rstatix)
+#I want to compare the relevant reefs (Reefs with flats and crests) to. non reefs.
+
+#Get data
+kdata<-comparison_data%>%
+  select(keep,Island,Region,everything())%>%
+  filter(keep=="keep")%>%
+  group_by(Island)%>%
+  select(SRate_m, Island, Transect_Type) %>%
+  mutate(Group = str_c(Island, " ", Transect_Type))%>%
+  mutate(Island = factor(Island, levels=c("Kauai", "Oahu", "Maui")),
+         Transect_Type = factor(Transect_Type, levels = c("Reef Protected", "Unprotected"))) %>%
+  arrange(Transect_Type) %>%
+  arrange(Island)
+
+
+res.kruskal <- kdata %>%
+  kruskal_test(SRate_m ~ Group)
+res.kruskal
+
+kdata %>%
+  kruskal_effsize(SRate_m ~ Group)
+
+pwc.dunns <- kdata %>%
+  dunn_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.dunns
+
+pwc.wilcox <- kdata %>%
+  wilcox_test(SRate_m ~ Group, p.adjust.method = "bonferroni")
+pwc.wilcox
+
+pwc.dunns<- pwc.dunns %>% add_xy_position(x = "Group")
+
+ggpubr::ggboxplot(kdata, x = "Group", y = "SRate_m") +
+  ggpubr::stat_pvalue_manual(pwc.dunns, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.kruskal, detailed = TRUE),
+    caption = get_pwc_label(pwc.dunns)
+    )+
+  coord_flip()
+```

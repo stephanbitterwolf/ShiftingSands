@@ -1,0 +1,55 @@
+---
+title: "Merging_Storlazzi_Transects"
+author: "Stephan Bitterwolf"
+date: "1/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## About
+
+
+Here I merge transects for Kauai, Oahu, and Maui. 
+
+Important: Files used for Kauai and Maui are from 2016 but the Oahu ones used were modified in 2018 by Borja Reguero. The Oahu Transects had a filename ending in MOD2.
+
+
+
+```{r merge shapefiles}
+library(foreign) #required to load .dbf files
+library(dplyr) #data manipulation
+library(ggplot2) #data plotting
+library(ggmap)#data for basemaps
+library(sf)#for joining shapefiles
+library(here)
+
+
+islands = c("Oahu","Maui", "Kauai") #Create Island Names
+
+#https://stackoverflow.com/questions/53507133/combining-multiple-shapefiles-in-r
+for (island in islands) {
+  path<- paste(here("0_data","transects"),"/Transects_", island, ".shp",sep="") 
+  print(path)
+  data <- st_read(path)
+  #data <- st_transform(data, 32604)
+  data$island <- island
+  assign(paste(island,"_shape", sep=""),data)
+  plot(st_geometry(data))
+}
+rm(data)
+Hawaii_shape<- rbind(Maui_shape, Oahu_shape, Kauai_shape)
+Hawaii_shape<- Hawaii_shape %>%
+  tibble::rownames_to_column(var = "trns_ID")
+
+
+
+dir.create(paste(here("2_output","modified_shapefiles"),"/transects",sep=""))           
+st_write(Hawaii_shape, paste(here("2_output","modified_shapefiles","transects"),"/transects_merged.gpkg", sep=""),delete_layer = TRUE)
+
+
+ggplot(Hawaii_shape)+
+   geom_sf()
+```

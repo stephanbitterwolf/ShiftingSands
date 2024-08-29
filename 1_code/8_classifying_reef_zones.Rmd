@@ -1,0 +1,383 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: cerulean
+    df_print: paged
+    code_folding: "hide"
+---
+
+Outline of the process of getting coral data into my reef transects.
+
+1. Join coral zone data from NOAA data for all islands
+2. Extract data for densified transects from he NOAA habitat maps
+3. Calculate variables such as Reef_Flat width
+4. Examine Paper from mexico to determine the variables of importance
+  a. Reef_Flat Width
+  b. Reef_Crest Width
+  c. Distance of Reef from Shore
+  
+  
+ NOAA has created habitat maps for the Hawaiian islands. The maps can be found at this link: https://cdn.coastalscience.noaa.gov/datasets/e97/2007/shapes_benthic/Habitat_GIS_Data.zip. Just download them, unzip them in the shapefile folder, name the folder "Hawaii_Habitat_GIS_Data", and proceed from there.
+  
+```{r Joining Hawaii Habitat Data, message=FALSE, warning=FALSE}
+library(sf)
+library(dplyr)
+library(tidyverse)
+library(here)
+#Import the habitat shapefiles for Kauai, Oahu, and Maui
+Habitat_Kauai <- st_read(here("0_data", "habitat","kauai.shp"))
+Habitat_Oahu <- st_read(here("0_data", "habitat","oahu.shp"))
+Habitat_Maui <- st_read(here("0_data", "habitat","maui.shp"))
+
+#Join Hawaii Habitat
+Habitat_Merged <- rbind(Habitat_Kauai, Habitat_Oahu, Habitat_Maui)
+rm(Habitat_Kauai, Habitat_Oahu, Habitat_Maui)
+
+#Remove Spaces in Zone Labels
+Habitat_Merged$ZONE <-gsub(pattern = " ", replacement = "_", Habitat_Merged$ZONE)
+
+#Reformat ZONE to Zone
+Habitat_Merged<-rename(Habitat_Merged, Zone = ZONE)
+```
+
+```{r Import Transect Data and Set Same Projection}
+#Import the Reef Transect Data
+Transect_Points <- st_read(here("2_output", "modified_shapefiles", "bathymetry", "sampled_transect_depths.gpkg"))
+format(object.size(Transect_Points), units = "GB")
+
+
+### Cleaning up Transect_Points
+library(dplyr)
+Transect_Points <- Transect_Points %>%
+  dplyr::select(Transects_ID,island_reef,distance, SAMPLE_1) %>%
+  mutate(Distance=round(distance, digits=0),
+         Depth=round(SAMPLE_1, digits=3),
+         .keep="unused")
+format(object.size(Transect_Points), units = "GB")
+
+
+#Trim transects to remove points deeper than 10 m (-10) 
+Trimmed_Transect_Points<-Transect_Points%>%
+  group_by(Transects_ID)%>%
+  mutate(
+    max_distance_depth_lt_10 = max(Distance[Depth > -10], na.rm = TRUE), #determine the maximum Distance at which we still get a depth value
+    include_row = (Distance <= max_distance_depth_lt_10) #make a new column that determines if the row will be included or removed
+  )%>%
+  filter(include_row==TRUE)%>% #remove all rows where include_row == FALSE
+  dplyr::select(-max_distance_depth_lt_10, -include_row)%>% #remove the new columns we made
+  filter(Distance<2800) #keep only distances less than 2.5 km. Longer than this leads to issues in Kaneohe Bay.
+format(object.size(Trimmed_Transect_Points), units = "GB")
+
+# #Rename island to Island
+# Trimmed_Transect_Points<-rename(Trimmed_Transect_Points)
+#Are the two file types using the same projections?
+
+st_crs(Trimmed_Transect_Points) == st_crs(Habitat_Merged)
+
+#Transform the projection so that they all have the same
+Habitat_Merged <- st_transform(Habitat_Merged, st_crs(Trimmed_Transect_Points))
+# Transect_Points <- st_transform(Transect_Points, st_crs(Habitat_Kauai))
+
+#Are the two file types using the same projections?
+st_crs(Trimmed_Transect_Points) == st_crs(Habitat_Merged)
+```
+
+```{r Save Habitat and Transect Data to Shapefiles, warning=FALSE}
+dir.create(here("2_output","modified_shapefiles","habitat"))
+st_write(Habitat_Merged, here("2_output","modified_shapefiles","habitat","habitat_merged.gpkg"), delete_layer = TRUE)
+st_write(Trimmed_Transect_Points, here("2_output", "modified_shapefiles", "bathymetry", "sampled_transect_depths-trimmed.gpkg"), delete_layer = TRUE)
+rm(list = ls())
+```
+
+```{r Subset Habitat Data for Reef Values and Join with Transects, warning=FALSE}
+library(sf)
+library(dplyr)
+library(tidyverse)
+
+Habitat_Merged<- st_read(here("2_output","modified_shapefiles","habitat","habitat_merged.gpkg"))
+Transect_Points<-st_read(here("2_output", "modified_shapefiles", "bathymetry", "sampled_transect_depths-trimmed.gpkg"))
+Reef_Habitat <- Habitat_Merged
+
+Joined_Data <- st_join(Transect_Points, Reef_Habitat, join = st_intersects)
+
+# Joined_Data <- Joined_Data %>%
+#   filter(Depth >-31)
+
+st_write(Joined_Data, here("2_output","modified_shapefiles","habitat","depth_and_habitat.gpkg"), delete_layer = TRUE)
+write_csv(Joined_Data, here("2_output","dataframes","8_depth_and_habitat.gcsv"))
+rm(list = ls())
+```
+
+```{r Calculate Reef Values}
+library(sf)
+library(dplyr)
+library(tidyverse)
+library(here)
+
+Joined_Data<-st_read(here("2_output","modified_shapefiles","habitat","depth_and_habitat.gpkg"))
+# Joined_Data$Uniq_ID <- as.numeric(Joined_Data$trns_ID)
+# Joined_Data$Trns_ID <- as.numeric(Joined_Data$Trns_ID)
+
+Data_Summarized <- st_drop_geometry(Joined_Data) %>%
+  mutate(Transects_ID=as.numeric(Transects_ID))%>%
+  group_by(Transects_ID,island_reef, Zone) %>%
+  filter(Zone =="Reef_Flat" | Zone =="Reef_Crest" | Zone == "Fore_Reef")%>%
+  mutate(Zone = factor(Zone, levels = c("Reef_Flat", "Reef_Crest", "Fore_Reef")))%>%
+  summarise(Distance_Offshore=min(Distance)+10,
+            Zone_Width=length(Distance)*5, #since each point corresponds to 5 m simply count the number of points and multiply by 5
+            Mean_Depth=mean(Depth*-1),
+            Median_Depth=median(Depth*-1),
+            Max_Depth=max(Depth*-1),
+            Min_Depth=min(Depth*-1)
+            ) ### Multiply the values by -1 to flip them. Depth will be positive and anything less than 0 indicates a distance above land
+
+
+### Calculate Slopes of Each Zone by Trns_ID
+library(tidyverse)
+Slopes <- st_drop_geometry(Joined_Data) %>%
+  filter(Zone =="Fore_Reef" | Zone =="Reef_Crest" | Zone == "Reef_Flat")%>%
+  mutate(Zone = factor(Zone, levels = c("Reef_Flat", "Reef_Crest", "Fore_Reef")))%>%
+  dplyr::select(Transects_ID,island_reef, Zone, Depth, Distance)%>%
+  nest(-c("Transects_ID","island_reef", "Zone")) %>%
+  mutate(slope = map(data, ~coef(lm(Depth ~ Distance, data = .x))[["Distance"]]))%>%
+  dplyr::select(-data)
+
+Slopes$slope <- as.numeric(Slopes$slope)
+
+#Determine the number of NA values. These tend to be generated by zones with only 1 value.
+na_count <- Slopes %>% 
+  summarize_all(~sum(is.na(.)))
+
+library(gt)
+na_count %>% gt %>% 
+  tab_header(
+    title = "Count of NA values per column"
+  )
+
+#Remove NA values
+Slopes<-Slopes%>%
+  filter(complete.cases(.))
+
+
+
+Data_Summarized <-merge(Data_Summarized, Slopes, by=c("Transects_ID","island_reef","Zone"), all=T)
+
+Reef_Geometery<-Data_Summarized%>%
+  mutate(Zone = factor(Zone, levels = c("Reef_Flat", "Reef_Crest", "Fore_Reef")))%>%
+  pivot_wider(names_from = Zone, values_from = c(4:10))
+Reef_Geometery<-Reef_Geometery %>%
+  rename(Island=island_reef)
+
+write.csv(Reef_Geometery, here("2_output", "dataframes", "reef_geometry.csv"), row.names = FALSE)
+```
+
+```{r plot example profile}
+#Here I will plot one profile to show what the data look like in a figure
+st_read(here("2_output","modified_shapefiles","habitat","depth_and_habitat.gpkg"))
+#Replace _ with " " in Joined_Data$Zone
+Joined_Data$Zone <-gsub(pattern = "_", replacement = " ", Joined_Data$Zone)
+
+#Relevel Zone in the following order: Land, Reef_Flat, Reef_Crest, Fore_Reef, Bank/Shelf
+Joined_Data$Zone <- factor(Joined_Data$Zone, levels = c("Land", "Reef Flat", "Reef Crest", "Fore Reef", "Bank/Shelf"))
+
+#Create Custom Color Scale
+custom_colors<-c("Land"="#147700", "Reef Flat"="#ffcc00", "Reef Crest"="#0000ff", "Fore Reef"="#ff0000", "Bank/Shelf"="#00948d")
+
+Joined_Data%>%
+  filter(Transects_ID == "3138")%>%
+  select(Distance, Depth, Zone)%>%
+  #remove NA values
+  na.omit()%>%
+  ggplot(aes(x=Distance, y=Depth, color=Zone))+
+  geom_point()+
+  geom_line(linetype = "solid", linewidth = 0.2)+
+  scale_color_manual(values=custom_colors)+
+  labs(
+       x="Distance Offshore (m)",
+       y="Depth (m)",
+       color="Habitat Type")+
+  scale_y_continuous(limit=c(-10,0))+
+  theme_classic()
+ggsave(here("3_report","method_figures","example_profile.jpg"), width = 8, height = 4, dpi = 300)
+
+
+```
+
+
+```{r plots}
+
+Reef_Geometery %>%
+  ggplot(aes(x=`Median_Depth_Reef_Flat`))+
+  geom_histogram()+
+  facet_wrap(~Island)
+
+Reef_Geometery %>%
+  ggplot(aes(x=Distance_Offshore_Reef_Crest))+
+  geom_histogram()+
+  facet_wrap(~Island)
+
+Reef_Geometery%>%
+  ggplot(aes(x=Transects_ID, y=10, color=Island))+
+  geom_point()
+
+gt(as.data.frame(table(Reef_Geometery$Island)))%>%
+  tab_header(
+    title = "Number of Reef+Erosion transects per Island"
+  )
+```
+
+```{r Summarize Reef Values}
+
+# Reef_Geometery <-read.csv(file = "Reef_Geometry.csv")
+Reef_Geometery <- Reef_Geometery %>% 
+  dplyr::select(-Island)
+Reef_Geometery$Transects_ID <- as.numeric(Reef_Geometery$Transects_ID)
+
+Transect_Points <- st_drop_geometry(st_read(here("2_output", "modified_shapefiles", "bathymetry", "sampled_transect_depths-trimmed.gpkg")))
+Transect_Points$Transects_ID <- as.numeric(Transect_Points$Transects_ID)
+
+Transect_Points<-Transect_Points %>%
+  rename(Island=island_reef)
+
+All_Transects <- Transect_Points %>%
+  dplyr::select(Transects_ID, Island)%>%
+  group_by(Transects_ID) %>%
+  distinct(.)
+
+Reef_Summary<- full_join(All_Transects, Reef_Geometery, by = "Transects_ID")
+
+Reef_Summary <- Reef_Summary %>%
+  mutate(Transect_Type = ifelse(rowSums(across(Distance_Offshore_Fore_Reef:slope_Reef_Flat), na.rm=TRUE) != 0, "Reef", "Non-Reef"),
+         Has_Flat = ifelse(is.na(Zone_Width_Reef_Flat) == FALSE, "Yes", "No"),
+         Has_Crest = ifelse(is.na(Zone_Width_Reef_Crest) == FALSE, "Yes", "No"),
+        Has_Fore_Reef = ifelse(is.na(Zone_Width_Fore_Reef) == FALSE, "Yes", "No")) %>%
+  mutate(Reef_Zones = ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "Yes-No-No", "Flat Only",
+                             ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "No-Yes-No", "Crest Only",
+                                    ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "No-No-Yes", "Fore Reef Only",
+                                           ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "Yes-Yes-No", "Flat and Crest",
+                                                  ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "Yes-No-Yes", "Flat and Fore Reef",
+                                                         ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "No-Yes-Yes", "Crest and Fore Reef",
+                                                                ifelse(paste(Has_Flat, Has_Crest, Has_Fore_Reef, sep='-') == "Yes-Yes-Yes", "Flat, Crest, and Fore Reef", "No Reef"))))))), .keep="all")
+
+write.csv(Reef_Summary, here("2_output","dataframes", "Reef_Summary.csv"))
+
+
+sum<-as.data.frame(table(Reef_Summary$Reef_Zones))
+colnames(sum) <-c("Reef_Zones", "Count")
+levels(sum$Reef_Zones) <- c("Flat Only","Crest Only", "Fore Reef Only", "Flat and Crest", "Flat and Fore Reef", "Flat, Crest, and Fore Reef", "Crest and Fore Reef", "No Reef" )
+
+sum2 <- sum %>% 
+  mutate(csum = rev(cumsum(rev(Count))), 
+         pos = Count/2 + lead(csum, 1),
+         pos = if_else(is.na(pos), Count/2, pos))
+library(ggrepel)
+
+sum %>% 
+  ggplot(aes(x="", y=Count, fill=Reef_Zones)) +
+  #geom_bar(stat="identity", width=1) +
+  coord_polar("y")+
+  geom_col(color = "black") +
+  geom_label_repel(data = sum2,
+                   aes(y = pos, label = paste0(Count)),
+                   size = 4.5, nudge_x = 1, show.legend = FALSE) +
+  coord_polar(theta = "y")+
+  theme_void()+
+  labs(title="Number of Transects by Reef Zone Composition",
+       fill="Reef Zone Composition")
+ 
+paste(table(Reef_Summary$Has_Flat)[2], " transects have Reef Flats")
+paste(table(Reef_Summary$Has_Crest)[2], " transects have Reef Crests")
+paste(table(Reef_Summary$Has_Fore_Reef)[2], " transects have Fore Reefs")
+rm(list=ls())
+```
+
+
+
+```{r Identify Reef vs Non-Reef Transects}
+Trimmed_Transects <- st_read(here("2_output", "modified_shapefiles", "transects", "transects_final.gpkg"))
+Reef_Summary <- read.csv(here("2_output", "dataframes", "Reef_Summary.csv"))
+Reef_Summary$Transects_ID <- as.character(Reef_Summary$Transects_ID)
+Erosion_Data <- st_read(here("2_output", "modified_shapefiles", "erosion", "erosion_points.gpkg"))
+Reef_vs_Non_Reef_Transects <-inner_join(Trimmed_Transects, Reef_Summary, by= "Transects_ID")
+
+st_write(Reef_vs_Non_Reef_Transects, "test_reefs_vs_non_reefs.gpkg", delete_layer=TRUE)
+Coasts <- st_read(here("0_data", "coast", "HawaiiLandEditedByBitterwolf.shp")) #This coast data is from the Hawaii Habitat files and was modified by Stephan Bitterwolf to remove island and artificial structures as well as correct any small coastline issues impacting reef transects and erosion points. The original maps can be found at this link: https://cdn.coastalscience.noaa.gov/datasets/e97/2007/shapes_benthic/Habitat_GIS_Data.zip
+
+library(ggspatial)
+ggplot() +
+  geom_sf(data=filter(Reef_vs_Non_Reef_Transects,Transect_Type=="Non-Reef"), aes(color="A"), show.legend = "point")+
+  geom_sf(data=filter(Reef_vs_Non_Reef_Transects,Transect_Type=="Reef"), aes(color="B"), show.legend = "point")+
+  geom_sf(data=Erosion_Data, aes(color="C"), size=0.1, show.legend = "point")+
+  geom_sf(data = Coasts, fill="antiquewhite", lwd = 0)+
+  theme_dark()+
+  scale_color_manual(values = c("A"="Blue", "B"="Orange", "C"="Red"), 
+                       labels = c("Non-Reef", "Reef", "Erosion Data"),
+                       name = "Transect Type")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+#Save Erosion Map to 3_report
+ggsave(here("3_report","method_figures","Reef_and_erosion_map.png"), width = 12.5, height = 7.03, units = "in")
+
+
+ggplot() +
+  geom_sf(data=Reef_vs_Non_Reef_Transects, aes(color=Reef_Zones), show.legend = "point")+
+  geom_sf(data = Coasts, fill="antiquewhite", lwd = 0)+
+   scale_color_manual(values = c("Pink", "Orange", "Yellow", "Green", "Red", "Brown", "Blue", "Grey"), 
+                       labels = c("Crest Only", "Flat and Crest", "Flat and Fore Reef", "Flat Only", "Flat, Crest, and Fore Reef", "Fore Reef Only", "No Reef"),
+                       name = "Legend")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+#ggsave("Reef_Zone_Map.jpg", dpi = 1200, width = 12.5, height = 7.03, units = "in", limitsize= FALSE)
+```
+
+```{r Join Geometry to full dataset}
+library(sf)
+library(here)
+Reefs_and_Erosion <- sf::st_read(here( "2_output", "modified_shapefiles", "joined_databases","Reefs_and_Erosion.gpkg"))
+Reefs_and_Erosion$Transects_ID<- as.character(Reefs_and_Erosion$Transects_ID)
+Reefs_and_Erosion_w_Geometry<- inner_join(Reefs_and_Erosion,Reef_Summary, by="Transects_ID")
+write_csv(st_drop_geometry(Reefs_and_Erosion_w_Geometry), here("2_output", "dataframes", "Reefs_and_Erosion_w_Geometry.csv"))
+st_write(Reefs_and_Erosion_w_Geometry, here("2_output","modified_shapefiles","joined_databases","Reefs_and_Erosion_w_Geometry.gpkg"), delete_layer = TRUE)
+
+# Reef_Summary
+# join: Trns_ID=Uniq_ID
+
+ggplot() +
+  geom_sf(data=Reefs_and_Erosion_w_Geometry, aes(color=Mean_Depth_Reef_Crest), show.legend = "point")+
+  geom_sf(data = Coasts, fill="antiquewhite", lwd = 0)+
+   # scale_color_manual(values = c("Pink", "Orange", "Yellow", "Green", "Red", "Brown", "Grey"), 
+   #                     labels = c("Crest Only", "Flat and Crest", "Flat and Fore Reef", "Flat Only", "Flat, Crest, and Fore Reef", "Fore Reef Only", "No Reef"),
+   #                     name = "Legend")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(panel.background = element_rect(fill = "aliceblue"), plot.title = element_text(hjust = 0.5))+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.1, "in"), pad_y = unit(0.20, "in"), style = north_arrow_fancy_orienteering)
+
+Habitat_Merged<-st_read(here( "2_output", "modified_shapefiles", "habitat","Habitat_Merged.gpkg"))
+Habitat_Merged<- Habitat_Merged %>%
+  filter(Zone =="Land" | Zone =="Fore_Reef" | Zone =="Reef_Crest" | Zone == "Reef_Flat")%>%
+  mutate(Zone = factor(Zone, levels = c("Land", "Reef_Flat", "Reef_Crest", "Fore_Reef")))
+library(tmap)
+library(scico)
+tmap_mode("view")
+tmap_options(check.and.fix = TRUE)
+tm_basemap("Stamen.Watercolor")+
+tm_basemap(leaflet::providers$Stamen.Toner)+
+  tm_shape(Habitat_Merged)+
+  tm_polygons(col="Zone", palette=c(Land='green', Reef_Flat='white', Reef_Crest='yellow',Fore_Reef='red'))+
+  tm_shape(Reefs_and_Erosion_w_Geometry)+
+  tm_dots(col="SRate_m", border.col=NULL, alpha=0.8, size=.1, palette="RdYlBu", midpoint=0)
+
+```
